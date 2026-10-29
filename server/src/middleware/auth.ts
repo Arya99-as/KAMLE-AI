@@ -9,7 +9,6 @@ function extractToken(req: Request): string | null {
   return null;
 }
 
-/** Requires a valid, active user. Loads the user from the DB to honour suspensions. */
 export async function authenticate(req: Request, _res: Response, next: NextFunction): Promise<void> {
   try {
     const token = extractToken(req);
@@ -34,7 +33,6 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
   }
 }
 
-/** Optional auth: attaches the user when a valid token is present, never rejects. */
 export async function optionalAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const token = extractToken(req);
   if (!token) return next();
@@ -45,12 +43,11 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
       req.user = { id: String(user._id), role: user.role };
     }
   } catch {
-    // ignore invalid tokens on optional routes
+    // ignore
   }
   next();
 }
 
-/** Role guard. Use after authenticate(). Authorization is always enforced server-side. */
 export function requireRole(...roles: Role[]) {
   return (req: Request, _res: Response, next: NextFunction): void => {
     if (!req.user) return next(ApiError.unauthorized());
@@ -60,3 +57,5 @@ export function requireRole(...roles: Role[]) {
     next();
   };
 }
+
+export const authorize = requireRole;

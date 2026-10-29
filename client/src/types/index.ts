@@ -74,6 +74,7 @@ export interface Review {
   _id?: string;
   workerId?: string | UserRef;
   customerId?: string | UserRef;
+  enquiryId?: string;
   rating: number;
   comment: string;
   moderationStatus?: "pending" | "approved" | "rejected";
@@ -92,8 +93,20 @@ export interface UserRef {
   _id: string;
   name: string;
   phone?: string;
+  email?: string;
   avatarUrl?: string;
 }
+
+export type EnquiryStatus =
+  | "PENDING"
+  | "ACCEPTED"
+  | "REJECTED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "DISPUTED"
+  | "sent"
+  | "declined";
 
 export interface Enquiry {
   _id: string;
@@ -102,10 +115,57 @@ export interface Enquiry {
   serviceCategory: string;
   problemDescription: string;
   location: string;
-  status: "sent" | "accepted" | "declined" | "completed" | "cancelled";
+  status: EnquiryStatus;
+  serviceAmount?: number;
+  paymentStatus?: "UNPAID" | "PAID" | "REFUNDED";
+  clientConfirmedAt?: string;
+  disputeReason?: string;
+  disputeResolvedAt?: string;
   statusHistory?: EnquiryStatusEvent[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Payment {
+  _id: string;
+  enquiryId: string | { _id: string; serviceCategory?: string; problemDescription?: string };
+  customerId: string | UserRef;
+  workerId: string | UserRef;
+  amount: number;
+  currency: string;
+  commissionPercent: number;
+  commissionAmount: number;
+  workerPayableAmount: number;
+  status: "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
+  provider: string;
+  transactionRef: string;
+  providerOrderId?: string;
+  providerPaymentId?: string;
+  paymentMethod?: string;
+  verifiedAt?: string;
+  createdAt: string;
+}
+
+export interface Payout {
+  _id: string;
+  workerId: string | UserRef;
+  enquiryId: string | { _id: string; serviceCategory?: string };
+  paymentId: string | { _id: string; transactionRef: string; amount: number };
+  serviceAmount: number;
+  commissionAmount: number;
+  workerPayableAmount: number;
+  status: "PENDING" | "PROCESSING" | "PAID" | "FAILED";
+  providerPayoutRef?: string;
+  paidAt?: string;
+  note?: string;
+  createdAt: string;
+}
+
+export interface PlatformConfig {
+  _id?: string;
+  key: string;
+  commissionPercent: number;
+  payoutTerms: string;
 }
 
 export interface ServiceCategory {
@@ -140,6 +200,7 @@ export interface Paginated<T> {
   page: number;
   limit: number;
   total: number;
+  pages: number;
   totalPages: number;
-  hasNext: boolean;
+  hasNext?: boolean;
 }

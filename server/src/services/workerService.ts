@@ -56,10 +56,13 @@ export function toPublicWorker(profile: IWorkerProfile, user: LeanUser, reasons?
   };
 }
 
-/** Load an approved worker profile by its own id. Returns null if not public. */
-export async function getPublicWorkerById(profileId: string) {
-  if (!mongoose.isValidObjectId(profileId)) return null;
-  const profile = await WorkerProfile.findOne({ _id: profileId, approvalStatus: "approved" })
+/** Load an approved worker profile by its profile id or user id. Returns null if not public. */
+export async function getPublicWorkerById(idOrUserId: string) {
+  if (!mongoose.isValidObjectId(idOrUserId)) return null;
+  const profile = await WorkerProfile.findOne({
+    $or: [{ _id: idOrUserId }, { userId: idOrUserId }],
+    approvalStatus: "approved",
+  })
     .populate<{ userId: LeanUser | null }>("userId", "name avatarUrl accountStatus role phone")
     .exec();
   if (!profile) return null;
@@ -68,10 +71,10 @@ export async function getPublicWorkerById(profileId: string) {
   return { profile, user };
 }
 
-/** Recompute a worker's rating aggregate from approved reviews only. */
+/** Recompute a worker's rating aggregate from active reviews (excludes rejected). */
 export async function recomputeRating(workerUserId: string): Promise<void> {
   const stats = await Review.aggregate<{ _id: mongoose.Types.ObjectId; avg: number; count: number }>([
-    { $match: { workerId: new mongoose.Types.ObjectId(workerUserId), moderationStatus: "approved" } },
+    { $match: { workerId: new mongoose.Types.ObjectId(workerUserId), moderationStatus: { $ne: "rejected" } } },
     { $group: { _id: "$workerId", avg: { $avg: "$rating" }, count: { $sum: 1 } } },
   ]);
   const result = stats[0];

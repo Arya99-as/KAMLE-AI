@@ -10,34 +10,89 @@ import type { createEnquirySchema, updateEnquiryStatusSchema } from "../validato
 type CreateInput = z.infer<typeof createEnquirySchema>;
 type UpdateInput = z.infer<typeof updateEnquiryStatusSchema>;
 
-type ActorRole = "customer" | "worker";
-const TRANSITIONS: Record<EnquiryStatus, Partial<Record<ActorRole, EnquiryStatus[]>>> = {
-  sent: { worker: ["accepted", "declined"], customer: ["cancelled"] },
-  accepted: { worker: ["completed"], customer: ["cancelled"] },
+type ActorRole = "customer" | "worker" | "admin";
+
+function normalizeStatus(st: string): EnquiryStatus {
+  if (st === "sent") return "PENDING";
+  if (st === "declined") return "REJECTED";
+  if (st === "completed") return "COMPLETED";
+  if (st === "accepted") return "ACCEPTED";
+  if (st === "cancelled") return "CANCELLED";
+  return st as EnquiryStatus;
+}
+
+const TRANSITIONS: Record<string, Partial<Record<ActorRole, string[]>>> = {
+  PENDING: {
+    worker: ["ACCEPTED", "REJECTED", "accepted", "declined"],
+    customer: ["CANCELLED", "cancelled"],
+    admin: ["CANCELLED"],
+  },
+  sent: {
+    worker: ["ACCEPTED", "REJECTED", "accepted", "declined"],
+    customer: ["CANCELLED", "cancelled"],
+    admin: ["CANCELLED"],
+  },
+  ACCEPTED: {
+    worker: ["IN_PROGRESS", "COMPLETED", "completed"],
+    customer: ["CANCELLED", "cancelled"],
+    admin: ["CANCELLED"],
+  },
+  accepted: {
+    worker: ["IN_PROGRESS", "COMPLETED", "completed"],
+    customer: ["CANCELLED", "cancelled"],
+    admin: ["CANCELLED"],
+  },
+  IN_PROGRESS: {
+    worker: ["COMPLETED", "completed"],
+    customer: ["DISPUTED"],
+    admin: ["CANCELLED", "DISPUTED"],
+  },
+  COMPLETED: {
+    customer: ["DISPUTED"],
+    admin: ["DISPUTED"],
+  },
+  completed: {
+    customer: ["DISPUTED"],
+    admin: ["DISPUTED"],
+  },
+  DISPUTED: {
+    customer: ["COMPLETED"],
+    admin: ["COMPLETED", "CANCELLED"],
+  },
+  REJECTED: {},
   declined: {},
-  completed: {},
+  CANCELLED: {},
   cancelled: {},
 };
 
 const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export async function createEnquiry(req: Request<unknown, unknown, CreateInput>, res: Response) {
-  const { workerId, serviceCategory, problemDescription, location } = req.body;
+  if (req.user && req.user.role !== "customer") {
+    throw ApiError.forbidden("Only customers can create service requests");
+  }
+
+  const { workerId, serviceCategory, problemDescription, location, serviceAmount } = req.body;
 
   if (!mongoose.isValidObjectId(workerId)) throw ApiError.badRequest("Invalid worker");
-  if (workerId === req.user!.id) throw ApiError.badRequest("You cannot send an enquiry to yourself");
+  if (workerId === req.user!.id) throw ApiError.badRequest("You cannot send a request to yourself");
 
   const profile = await WorkerProfile.findOne({ userId: workerId, approvalStatus: "approved" }).exec();
-  if (!profile) throw ApiError.notFound("This worker is not available for enquiries");
+  if (!profile) throw ApiError.notFound("This worker is not available or not yet approved");
 
-  // Prevent duplicate submissions to the same worker within a short window.
   const recent = await Enquiry.findOne({
     customerId: req.user!.id,
     workerId,
-    status: { $in: ["sent", "accepted"] },
+    status: { $in: ["PENDING", "sent", "ACCEPTED", "accepted", "IN_PROGRESS"] },
     createdAt: { $gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) },
   });
-  if (recent) throw ApiError.conflict("You already have an open enquiry with this worker");
+  if (recent) throw ApiError.conflict("You already have an active service request with this worker");
+
+  const initialAmountRaw = serviceAmount ?? (profile.pricing && profile.pricing.amount) ?? 0;
+  const initialAmount = Number(initialAmountRaw);
+  if (!Number.isFinite(initialAmount) || initialAmount < 0) {
+    throw ApiError.badRequest("Invalid service amount");
+  }
 
   const enquiry = await Enquiry.create({
     customerId: req.user!.id,
@@ -45,8 +100,10 @@ export async function createEnquiry(req: Request<unknown, unknown, CreateInput>,
     serviceCategory,
     problemDescription,
     location: location || "",
-    status: "sent",
-    statusHistory: [{ status: "sent", at: new Date(), by: new mongoose.Types.ObjectId(req.user!.id) }],
+    serviceAmount: initialAmount,
+    status: "PENDING",
+    paymentStatus: "UNPAID",
+    statusHistory: [{ status: "PENDING", at: new Date(), by: new mongoose.Types.ObjectId(req.user!.id), note: "Service request created" }],
   });
 
   res.status(201).json({ enquiry });
@@ -57,26 +114,30 @@ export async function listMyEnquiries(req: Request, res: Response) {
   const role = req.user!.role;
   const filter: Record<string, unknown> = {};
 
-  if (box === "received") {
+  if (role === "admin") {
+    if (req.query.status) {
+      filter.status = req.query.status;
+    }
+  } else if (box === "received" || role === "worker") {
     filter.workerId = req.user!.id;
-  } else if (box === "sent") {
+  } else if (box === "sent" || role === "customer") {
     filter.customerId = req.user!.id;
   } else {
     filter.$or = [{ customerId: req.user!.id }, { workerId: req.user!.id }];
   }
 
-  if (role !== "admin" && box === "all") {
-    filter.$or = [{ customerId: req.user!.id }, { workerId: req.user!.id }];
+  if (req.query.status && role !== "admin") {
+    filter.status = req.query.status;
   }
 
-  const page = getPagination(req.query as Record<string, unknown>, 20);
+  const page = getPagination(req.query as Record<string, unknown>, 30);
   const [items, total] = await Promise.all([
     Enquiry.find(filter)
       .sort({ createdAt: -1 })
       .skip(page.skip)
       .limit(page.limit)
-      .populate("customerId", "name phone")
-      .populate("workerId", "name phone")
+      .populate("customerId", "name phone avatarUrl")
+      .populate("workerId", "name phone avatarUrl")
       .lean()
       .exec(),
     Enquiry.countDocuments(filter),
@@ -89,27 +150,108 @@ export async function updateEnquiryStatus(req: Request<{ id: string }, unknown, 
   if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.badRequest("Invalid enquiry id");
 
   const enquiry = await Enquiry.findById(req.params.id);
-  if (!enquiry) throw ApiError.notFound("Enquiry not found");
+  if (!enquiry) throw ApiError.notFound("Service request not found");
 
   const me = req.user!.id;
   const isCustomer = String(enquiry.customerId) === me;
   const isWorker = String(enquiry.workerId) === me;
-  if (!isCustomer && !isWorker) throw ApiError.forbidden("You are not part of this enquiry");
+  const isAdmin = req.user!.role === "admin";
 
-  const actor: ActorRole = isWorker ? "worker" : "customer";
-  const next = req.body.status as EnquiryStatus;
-  const allowed = TRANSITIONS[enquiry.status][actor] ?? [];
-  if (!allowed.includes(next)) {
-    throw ApiError.badRequest(`Cannot change status from "${enquiry.status}" to "${next}"`);
+  if (!isCustomer && !isWorker && !isAdmin) {
+    throw ApiError.forbidden("You are not authorized to update this service request");
   }
 
-  enquiry.status = next;
-  enquiry.statusHistory.push({ status: next, at: new Date(), by: new mongoose.Types.ObjectId(req.user!.id), note: req.body.note });
+  const actor: ActorRole = isAdmin ? "admin" : isWorker ? "worker" : "customer";
+  const requestedStatus = req.body.status;
+  const normalizedTarget = normalizeStatus(requestedStatus);
+
+  const allowedTransitions = TRANSITIONS[enquiry.status]?.[actor] ?? [];
+  if (!allowedTransitions.includes(requestedStatus) && !allowedTransitions.includes(normalizedTarget)) {
+    throw ApiError.badRequest("Cannot change request status from " + enquiry.status + " to " + requestedStatus + ". Unauthorized or invalid transition.");
+  }
+
+  enquiry.status = normalizedTarget;
+
+  if (req.body.serviceAmount !== undefined) {
+    const current = normalizeStatus(String(enquiry.status));
+    const target = normalizedTarget;
+    const allowedAmountChange = current === "PENDING" || current === "ACCEPTED" || target === "COMPLETED";
+    if (!allowedAmountChange) {
+      throw ApiError.badRequest("Service amount can only be updated while the request is pending, accepted, or when completing the job");
+    }
+    const nextAmount = Number(req.body.serviceAmount);
+    if (!Number.isFinite(nextAmount) || nextAmount < 0) {
+      throw ApiError.badRequest("Invalid service amount");
+    }
+    enquiry.serviceAmount = nextAmount;
+  }
+
+  if (normalizedTarget === "DISPUTED") {
+    enquiry.disputeReason = req.body.disputeReason || req.body.note || "Customer reported an issue";
+  } else if (normalizedTarget === "COMPLETED" && enquiry.disputeReason) {
+    enquiry.disputeResolvedAt = new Date();
+  }
+
+  enquiry.statusHistory.push({
+    status: normalizedTarget,
+    at: new Date(),
+    by: new mongoose.Types.ObjectId(req.user!.id),
+    note: req.body.note || req.body.disputeReason || "",
+  });
+
   await enquiry.save();
 
-  if (next === "completed") {
+  if (normalizedTarget === "COMPLETED") {
     await WorkerProfile.updateOne({ userId: enquiry.workerId }, { $inc: { completedEnquiries: 1 } });
   }
 
   res.json({ enquiry });
+}
+
+export async function confirmCompletion(req: Request<{ id: string }>, res: Response) {
+  if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.badRequest("Invalid enquiry id");
+
+  const enquiry = await Enquiry.findById(req.params.id);
+  if (!enquiry) throw ApiError.notFound("Service request not found");
+
+  if (String(enquiry.customerId) !== req.user!.id) {
+    throw ApiError.forbidden("Only the customer can confirm completion of this request");
+  }
+
+  if (normalizeStatus(String(enquiry.status)) !== "COMPLETED") {
+    throw ApiError.badRequest("You can confirm completion only after the worker marks the work as completed");
+  }
+
+  if (!enquiry.clientConfirmedAt) {
+    enquiry.clientConfirmedAt = new Date();
+    enquiry.statusHistory.push({
+      status: "COMPLETED",
+      at: new Date(),
+      by: new mongoose.Types.ObjectId(req.user!.id),
+      note: "Customer confirmed the work is completed",
+    });
+    await enquiry.save();
+  }
+
+  res.json({ success: true, enquiry });
+}
+
+export async function getEnquiryById(req: Request<{ id: string }>, res: Response) {
+  if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.badRequest("Invalid enquiry id");
+
+  const enquiry = await Enquiry.findById(req.params.id)
+    .populate("customerId", "name phone avatarUrl")
+    .populate("workerId", "name phone avatarUrl")
+    .lean()
+    .exec();
+
+  if (!enquiry) throw ApiError.notFound("Service request not found");
+
+  const me = req.user!.id;
+  const isAdmin = req.user!.role === "admin";
+  if (String(enquiry.customerId._id) !== me && String(enquiry.workerId._id) !== me && !isAdmin) {
+    throw ApiError.forbidden("Access denied");
+  }
+
+  res.json({ success: true, enquiry });
 }

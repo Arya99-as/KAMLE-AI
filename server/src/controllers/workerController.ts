@@ -7,6 +7,7 @@ import ApiError from "../utils/ApiError.js";
 import { buildPaginated, getPagination } from "../utils/pagination.js";
 import findMatches from "../services/matchingService.js";
 import { getPublicWorkerById, toPublicWorker } from "../services/workerService.js";
+import { heuristicParse } from "../services/aiService.js";
 import type { SearchQuery } from "../validators/search.js";
 import type { WorkerProfileInput } from "../validators/worker.js";
 
@@ -18,11 +19,31 @@ function resolveVerification(status: string, docCount: number): string {
 /** Public, paginated worker discovery (approved workers only). */
 export async function listWorkers(req: Request<unknown, unknown, unknown, SearchQuery>, res: Response) {
   const q = req.query;
+  let category = q.category ?? null;
+  let skills = q.skills ?? [];
+  let location = q.location ?? "";
+
+  // If customer provided a search/problem query, parse it to detect category & skills
+  if (q.q && q.q.trim()) {
+    const parsed = heuristicParse({
+      messages: [{ role: "user", content: q.q, at: new Date() }],
+    });
+    if (!category && parsed.requirements.service_category) {
+      category = parsed.requirements.service_category;
+    }
+    if (skills.length === 0 && parsed.requirements.required_skills?.length) {
+      skills = parsed.requirements.required_skills;
+    }
+    if (!location && parsed.requirements.location) {
+      location = parsed.requirements.location;
+    }
+  }
+
   const result = await findMatches(
     {
-      category: q.category ?? null,
-      skills: q.skills ?? [],
-      location: q.location ?? "",
+      category,
+      skills,
+      location,
       budget: q.maxBudget ?? null,
       text: q.q || null,
     },
@@ -45,7 +66,7 @@ export async function getWorker(req: Request<{ id: string }>, res: Response) {
   const found = await getPublicWorkerById(req.params.id);
   if (!found) throw ApiError.notFound("This worker profile is not available");
 
-  const reviews = await Review.find({ workerId: found.user._id, moderationStatus: "approved" })
+  const reviews = await Review.find({ workerId: found.user._id, moderationStatus: { $ne: "rejected" } })
     .sort({ createdAt: -1 })
     .limit(20)
     .populate<{ customerId: { name: string } | null }>("customerId", "name")

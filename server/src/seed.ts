@@ -259,7 +259,7 @@ async function run() {
     await Enquiry.create({
       customerId: customer._id, workerId: plumber._id, serviceCategory: "Plumbing",
       problemDescription: "Kitchen sink is leaking under the counter.", location: "Kolhapur",
-      status: "completed", statusHistory: [{ status: "sent", at: new Date(), by: customer._id }, { status: "accepted", at: new Date(), by: plumber._id }, { status: "completed", at: new Date(), by: plumber._id }],
+      status: "COMPLETED", statusHistory: [{ status: "sent", at: new Date(), by: customer._id }, { status: "ACCEPTED", at: new Date(), by: plumber._id }, { status: "COMPLETED", at: new Date(), by: plumber._id }],
     });
   }
   if (cleaner) {

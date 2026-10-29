@@ -1,15 +1,24 @@
+import crypto from "node:crypto";
 import env from "../config/env.js";
 import logger from "../utils/logger.js";
 import type { AiParseResult, ExtractedRequirements, ChatMessage, Urgency } from "../types/ai.js";
 import { requirementsSchema } from "../validators/chat.js";
+import AiLog, { type AiStatus } from "../models/AiLog.js";
+import AiConfig, { type IAiConfig } from "../models/AiConfig.js";
 
 export interface ParseInput {
   messages: ChatMessage[];
   previous?: Partial<ExtractedRequirements>;
+  userId?: string;
+  userRole?: string;
+  requestId?: string;
+  correlationId?: string;
+  feature?: string;
 }
 
 export interface ParseOutput extends AiParseResult {
   degraded: boolean;
+  requestId?: string;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -57,7 +66,7 @@ const CATEGORY_RULES: CategoryRule[] = [
   },
   {
     category: "Appliance Repair",
-    keywords: ["refrigerator", "fridge", "washing machine", "washing machine", "ac ", "air conditioner", "microwave", "oven", "geyser", "appliance", "dishwasher", "cooling", "not cooling"],
+    keywords: ["refrigerator", "fridge", "washing machine", "ac ", "air conditioner", "microwave", "oven", "geyser", "appliance", "dishwasher", "cooling", "not cooling"],
     skills: {
       refrigerator: "Refrigerator Repair",
       fridge: "Refrigerator Repair",
@@ -145,7 +154,7 @@ function titleCase(s: string): string {
     .join(" ");
 }
 
-function detectCategory(text: string): { category: string | null; matchedSkills: string[] } {
+export function detectCategory(text: string): { category: string | null; matchedSkills: string[] } {
   const lower = text.toLowerCase();
   let best: { category: string; hits: number; skills: Set<string> } | null = null;
 
@@ -167,7 +176,7 @@ function detectCategory(text: string): { category: string | null; matchedSkills:
   return { category: best.category, matchedSkills: Array.from(best.skills).slice(0, 5) };
 }
 
-function detectLocation(text: string): string | null {
+export function detectLocation(text: string): string | null {
   const lower = text.toLowerCase();
   for (const city of KNOWN_CITIES) {
     if (lower.includes(city.toLowerCase())) return city;
@@ -186,7 +195,7 @@ function detectLocation(text: string): string | null {
   return null;
 }
 
-function detectBudget(text: string): number | null {
+export function detectBudget(text: string): number | null {
   const lower = text.toLowerCase();
   const patterns = [
     /(?:under|below|upto|up to|less than|budget of|budget is|around|max)\s*₹?\s*([\d,]+)/i,
@@ -203,7 +212,7 @@ function detectBudget(text: string): number | null {
   return null;
 }
 
-function detectUrgency(text: string): Urgency {
+export function detectUrgency(text: string): Urgency {
   const lower = text.toLowerCase();
   if (/(emergency|asap|immediately|right now|urgent|very urgent)/.test(lower)) return "emergency";
   if (/(today|tonight|soon|urgently)/.test(lower)) return "high";
@@ -245,7 +254,6 @@ export function heuristicParse(input: ParseInput): AiParseResult {
     reply = `Thanks! I'll look for approved ${resolvedCategory.toLowerCase()} professionals serving ${location}.${skillText}`;
   }
 
-  // Acknowledge that we understand when text contains a phone number (privacy).
   if (/\b\d{10}\b/.test(allText) && !resolvedCategory) {
     reply += " Please avoid sharing personal phone numbers in the chat.";
   }
@@ -262,6 +270,96 @@ export function heuristicParse(input: ParseInput): AiParseResult {
       search_ready: searchReady,
     },
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Dynamic AI Configuration & Pricing Utilities                               */
+/* -------------------------------------------------------------------------- */
+
+let cachedConfig: IAiConfig | null = null;
+let lastConfigFetch = 0;
+const CONFIG_CACHE_TTL = 10000; // 10 seconds
+
+export async function getAiConfig(): Promise<IAiConfig> {
+  const now = Date.now();
+  if (cachedConfig && now - lastConfigFetch < CONFIG_CACHE_TTL) {
+    return cachedConfig;
+  }
+  try {
+    let conf = await AiConfig.findOne({ key: "global" }).exec();
+    if (!conf) {
+      conf = await AiConfig.create({
+        key: "global",
+        defaultProvider: env.ai.provider,
+        defaultModel: env.ai.model,
+        fallbackModels: env.ai.fallbackModels,
+        timeoutMs: env.ai.timeoutMs,
+      });
+    }
+    cachedConfig = conf;
+    lastConfigFetch = now;
+    return conf;
+  } catch {
+    // If DB isn't ready or during tests before connect, provide safe in-memory fallback
+    return {
+      key: "global",
+      defaultProvider: env.ai.provider,
+      defaultModel: env.ai.model,
+      fallbackModels: env.ai.fallbackModels,
+      timeoutMs: env.ai.timeoutMs,
+      retryLimit: 2,
+      fallbackEnabled: true,
+      budgets: {
+        dailyLimitUsd: 10.0,
+        monthlyLimitUsd: 150.0,
+        warningThresholdPercent: 80,
+        actionOnLimit: "warn",
+      },
+      logging: {
+        logMetadata: true,
+        retentionDays: 30,
+        retentionLevel: "sanitized",
+      },
+      features: {
+        problem_understanding: { enabled: true, description: "Problem interpretation" },
+        worker_matching: { enabled: true, description: "Worker ranking" },
+        ai_search: { enabled: true, description: "Search query parsing" },
+      },
+      pricing: [
+        { model: "gemini-3.5-flash-lite", provider: "gemini", inputPer1M: 0.075, outputPer1M: 0.3, effectiveDate: new Date() },
+        { model: "gpt-4o-mini", provider: "openai", inputPer1M: 0.15, outputPer1M: 0.6, effectiveDate: new Date() },
+        { model: "llama-3.3-70b-versatile", provider: "groq", inputPer1M: 0.59, outputPer1M: 0.79, effectiveDate: new Date() },
+      ],
+    } as unknown as IAiConfig;
+  }
+}
+
+export function invalidateAiConfigCache() {
+  cachedConfig = null;
+  lastConfigFetch = 0;
+}
+
+export function calculateEstimatedCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  config?: IAiConfig,
+): number {
+  if (inputTokens <= 0 && outputTokens <= 0) return 0;
+  const pricings = config?.pricing || [];
+  const match = pricings.find((p) => p.model.toLowerCase() === model.toLowerCase());
+  const inputRate = match?.inputPer1M ?? 0.075;
+  const outputRate = match?.outputPer1M ?? 0.3;
+  const cost = (inputTokens / 1_000_000) * inputRate + (outputTokens / 1_000_000) * outputRate;
+  return Number(cost.toFixed(6));
+}
+
+function redactSensitiveText(text: string): string {
+  // Redact 10-digit phone numbers, emails, credit card patterns
+  return text
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "[REDACTED_EMAIL]")
+    .replace(/\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, "[REDACTED_PHONE]")
+    .replace(/\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g, "[REDACTED_CARD]");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -301,8 +399,15 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
-async function callOpenAiCompatible(messages: ChatMessage[]): Promise<string> {
-  const { baseUrl, apiKey, model } = env.ai;
+interface ProviderCallResult {
+  text: string;
+  inputTokens: number;
+  outputTokens: number;
+  tokensEstimated: boolean;
+}
+
+async function callOpenAiCompatible(messages: ChatMessage[], model: string, timeoutMs: number): Promise<ProviderCallResult> {
+  const { baseUrl, apiKey } = env.ai;
   const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
   const res = await fetchWithTimeout(
     url,
@@ -319,17 +424,31 @@ async function callOpenAiCompatible(messages: ChatMessage[]): Promise<string> {
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...toProviderMessages(messages)],
       }),
     },
-    env.ai.timeoutMs,
+    timeoutMs,
   );
-  if (!res.ok) throw new Error(`AI provider responded ${res.status}`);
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    const err = new Error(`AI provider responded ${res.status}`);
+    (err as unknown as { status: number; responseText: string }).status = res.status;
+    (err as unknown as { status: number; responseText: string }).responseText = errText;
+    throw err;
+  }
+  const data = (await res.json()) as {
+    choices?: { message?: { content?: string } }[];
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  };
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error("Empty AI response");
-  return content;
+
+  const inputTokens = data.usage?.prompt_tokens ?? Math.ceil(JSON.stringify(messages).length / 4);
+  const outputTokens = data.usage?.completion_tokens ?? Math.ceil(content.length / 4);
+  const tokensEstimated = !data.usage?.prompt_tokens;
+
+  return { text: content, inputTokens, outputTokens, tokensEstimated };
 }
 
-async function callGemini(messages: ChatMessage[]): Promise<string> {
-  const { baseUrl, apiKey, model } = env.ai;
+async function callGemini(messages: ChatMessage[], model: string, timeoutMs: number): Promise<ProviderCallResult> {
+  const { baseUrl, apiKey } = env.ai;
   const url = `${baseUrl.replace(/\/$/, "")}/models/${model}:generateContent?key=${apiKey}`;
   const res = await fetchWithTimeout(
     url,
@@ -345,15 +464,27 @@ async function callGemini(messages: ChatMessage[]): Promise<string> {
         generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
       }),
     },
-    env.ai.timeoutMs,
+    timeoutMs,
   );
-  if (!res.ok) throw new Error(`Gemini responded ${res.status}`);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    const err = new Error(`Gemini responded ${res.status}`);
+    (err as unknown as { status: number; responseText: string }).status = res.status;
+    (err as unknown as { status: number; responseText: string }).responseText = errText;
+    throw err;
+  }
   const data = (await res.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
+    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
   };
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error("Empty Gemini response");
-  return text;
+
+  const inputTokens = data.usageMetadata?.promptTokenCount ?? Math.ceil(JSON.stringify(messages).length / 4);
+  const outputTokens = data.usageMetadata?.candidatesTokenCount ?? Math.ceil(text.length / 4);
+  const tokensEstimated = !data.usageMetadata?.promptTokenCount;
+
+  return { text, inputTokens, outputTokens, tokensEstimated };
 }
 
 function extractJson(raw: string): unknown {
@@ -393,8 +524,12 @@ export interface AiHealthResult {
  * Live connectivity check for the configured provider.
  * Hits the provider's model-list endpoint (cheap, no tokens consumed).
  */
-export async function checkAiProvider(): Promise<AiHealthResult> {
-  const { provider, baseUrl, apiKey, model } = env.ai;
+export async function checkAiProvider(targetProvider?: string): Promise<AiHealthResult> {
+  const provider = targetProvider || env.ai.provider;
+  const baseUrl = env.ai.baseUrl;
+  const apiKey = env.ai.apiKey;
+  const model = env.ai.model;
+
   const result: AiHealthResult = {
     provider,
     configured: false,
@@ -406,6 +541,14 @@ export async function checkAiProvider(): Promise<AiHealthResult> {
     models: [],
     error: null,
   };
+
+  if (provider === "heuristic") {
+    result.configured = true;
+    result.reachable = true;
+    result.latencyMs = 1;
+    result.models = ["heuristic-deterministic"];
+    return result;
+  }
 
   if (!isConfigured()) return result;
   result.configured = true;
@@ -447,45 +590,305 @@ export async function checkAiProvider(): Promise<AiHealthResult> {
   return result;
 }
 
-/** Parse a free-text request into structured requirements, with a safe fallback. */
-export async function parseRequest(input: ParseInput): Promise<ParseOutput> {
-  const fallback = heuristicParse(input);
+/** Map any free-text urgency the model returns onto our enum. */
+function normalizeUrgency(value: unknown): Urgency {
+  const s = String(value ?? "").toLowerCase();
+  if (/(emergency|urgent|asap|immediately|right now|critical)/.test(s)) return "emergency";
+  if (/(high|soon|today|tonight|quick|priority)/.test(s)) return "high";
+  if (/(low|no rush|whenever|flexible|not urgent)/.test(s)) return "low";
+  return "normal";
+}
 
-  if (!isConfigured()) {
-    return { ...fallback, degraded: env.ai.provider !== "heuristic" };
+/** Accept a budget as number or numeric string (e.g. "₹2,000") and coerce it. */
+function coerceBudget(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+  if (typeof value === "string") {
+    const n = Number(value.replace(/[^\d.]/g, ""));
+    if (Number.isFinite(n) && n >= 0) return n;
   }
+  return null;
+}
 
+/** Accept an array of strings, or a single string, and normalize to a clean array. */
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function classifyError(err: unknown): { category: string; code: string; safeMessage: string } {
+  const msg = err instanceof Error ? err.message : String(err);
+  const status = (err as { status?: number })?.status;
+
+  if (status === 401 || status === 403 || msg.includes("API key") || msg.includes("auth")) {
+    return { category: "AUTH_CONFIGURATION_ERROR", code: String(status || 401), safeMessage: "Authentication or API key verification failed" };
+  }
+  if (status === 429 || msg.includes("rate limit") || msg.includes("quota")) {
+    return { category: "RATE_LIMIT_EXCEEDED", code: "429", safeMessage: "Provider rate limit or quota exceeded" };
+  }
+  if (msg.includes("abort") || msg.includes("timeout") || msg.includes("ETIMEDOUT")) {
+    return { category: "PROVIDER_TIMEOUT", code: "TIMEOUT", safeMessage: "Provider request timed out after configured threshold" };
+  }
+  if (msg.includes("not valid JSON") || msg.includes("Unexpected token")) {
+    return { category: "INVALID_STRUCTURED_OUTPUT", code: "PARSE_ERROR", safeMessage: "Provider output could not be parsed into expected schema" };
+  }
+  if (msg.includes("fetch failed") || msg.includes("ECONNREFUSED") || msg.includes("ENOTFOUND")) {
+    return { category: "PROVIDER_CONNECTION_FAILURE", code: "CONN_ERR", safeMessage: "Failed to establish network connection to AI provider" };
+  }
+  if (status && status >= 500) {
+    return { category: "AI_SERVICE_UNAVAILABLE", code: String(status), safeMessage: "AI provider service temporarily unavailable (5xx)" };
+  }
+  return { category: "INTERNAL_PROCESSING_FAILURE", code: "500", safeMessage: "Internal processing error during AI execution" };
+}
+
+/**
+ * Record an activity log entry safely into MongoDB
+ */
+export async function logAiActivity(entry: {
+  requestId: string;
+  correlationId: string;
+  feature: string;
+  provider: string;
+  model: string;
+  operation: string;
+  status: AiStatus;
+  durationMs: number;
+  inputTokens: number;
+  outputTokens: number;
+  tokensEstimated: boolean;
+  estimatedCost: number;
+  retryCount: number;
+  fallbackUsed: boolean;
+  fallbackReason?: string;
+  errorCategory?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  userId?: string;
+  userRole?: string;
+  metadata?: Record<string, unknown>;
+}) {
   try {
-    const raw =
-      env.ai.provider === "gemini" ? await callGemini(input.messages) : await callOpenAiCompatible(input.messages);
-    const parsed = extractJson(raw) as Record<string, unknown>;
-
-    const requirements = requirementsSchema.parse({
-      service_category: parsed.service_category ?? null,
-      required_skills: parsed.required_skills ?? [],
-      location: parsed.location ?? null,
-      budget: typeof parsed.budget === "number" ? parsed.budget : null,
-      urgency: parsed.urgency ?? "normal",
-      missing_information: parsed.missing_information ?? [],
-      search_ready: Boolean(parsed.search_ready),
-    }) as ExtractedRequirements;
-
-    // Recompute readiness server-side; never trust the model blindly.
-    requirements.search_ready = Boolean(requirements.service_category && requirements.location);
-    requirements.missing_information = [];
-    if (!requirements.service_category) requirements.missing_information.push("service category");
-    if (!requirements.location) requirements.missing_information.push("service area");
-
-    const reply =
-      typeof parsed.reply === "string" && parsed.reply.trim().length > 0
-        ? parsed.reply.trim().slice(0, 600)
-        : fallback.reply;
-
-    return { reply, requirements, degraded: false };
+    await AiLog.create({
+      requestId: entry.requestId,
+      correlationId: entry.correlationId,
+      feature: entry.feature,
+      provider: entry.provider,
+      model: entry.model,
+      operation: entry.operation,
+      status: entry.status,
+      durationMs: entry.durationMs,
+      inputTokens: entry.inputTokens,
+      outputTokens: entry.outputTokens,
+      totalTokens: entry.inputTokens + entry.outputTokens,
+      tokensEstimated: entry.tokensEstimated,
+      estimatedCost: entry.estimatedCost,
+      retryCount: entry.retryCount,
+      fallbackUsed: entry.fallbackUsed,
+      fallbackReason: entry.fallbackReason,
+      errorCategory: entry.errorCategory,
+      errorCode: entry.errorCode,
+      errorMessage: entry.errorMessage,
+      userId: entry.userId || undefined,
+      userRole: entry.userRole || "anonymous",
+      metadata: entry.metadata || {},
+    });
   } catch (err) {
-    logger.warn("AI provider failed, using deterministic fallback", err);
-    return { ...fallback, degraded: true };
+    logger.warn("Failed to persist AI activity log", err);
   }
+}
+
+/** Parse a free-text request into structured requirements, with centralized logging and safe fallback. */
+export async function parseRequest(input: ParseInput): Promise<ParseOutput> {
+  const t0 = Date.now();
+  const requestId = input.requestId || `req_${crypto.randomUUID()}`;
+  const correlationId = input.correlationId || requestId;
+  const featureName = input.feature || "problem_understanding";
+
+  const fallback = heuristicParse(input);
+  const config = await getAiConfig();
+
+  // Check if feature is administratively disabled
+  const featureSetting = config.features && (config.features as any)[featureName];
+  if (featureSetting && featureSetting.enabled === false) {
+    const durationMs = Date.now() - t0;
+    void logAiActivity({
+      requestId,
+      correlationId,
+      feature: featureName,
+      provider: "heuristic",
+      model: "heuristic-fallback",
+      operation: "parse_request",
+      status: "FALLBACK",
+      durationMs,
+      inputTokens: 0,
+      outputTokens: 0,
+      tokensEstimated: false,
+      estimatedCost: 0,
+      retryCount: 0,
+      fallbackUsed: true,
+      fallbackReason: "Feature administratively disabled in AI Control Center",
+      userId: input.userId,
+      userRole: input.userRole,
+      metadata: { disabledByAdmin: true },
+    });
+    return { ...fallback, degraded: true, requestId };
+  }
+
+  // If external provider is not configured or set to heuristic
+  if (!isConfigured()) {
+    const durationMs = Date.now() - t0;
+    void logAiActivity({
+      requestId,
+      correlationId,
+      feature: featureName,
+      provider: env.ai.provider || "heuristic",
+      model: "heuristic",
+      operation: "parse_request",
+      status: "SUCCESS",
+      durationMs,
+      inputTokens: 0,
+      outputTokens: 0,
+      tokensEstimated: false,
+      estimatedCost: 0,
+      retryCount: 0,
+      fallbackUsed: env.ai.provider !== "heuristic",
+      fallbackReason: env.ai.provider !== "heuristic" ? "Provider unconfigured (using heuristic fallback)" : undefined,
+      userId: input.userId,
+      userRole: input.userRole,
+      metadata: {
+        categoryDetected: fallback.requirements.service_category,
+        searchReady: fallback.requirements.search_ready,
+      },
+    });
+    return { ...fallback, degraded: env.ai.provider !== "heuristic", requestId };
+  }
+
+  // Try configured models with fallback
+  const models = [config.defaultModel || env.ai.model, ...(config.fallbackModels || env.ai.fallbackModels)].filter(Boolean);
+  let retryCount = 0;
+  let lastErr: unknown = null;
+  let providerResult: ProviderCallResult | null = null;
+  let successfulModel = models[0] || "default";
+
+  for (let i = 0; i < models.length; i++) {
+    const currentModel = models[i]!;
+    try {
+      providerResult =
+        env.ai.provider === "gemini"
+          ? await callGemini(input.messages, currentModel, config.timeoutMs || env.ai.timeoutMs)
+          : await callOpenAiCompatible(input.messages, currentModel, config.timeoutMs || env.ai.timeoutMs);
+      successfulModel = currentModel;
+      break;
+    } catch (err) {
+      lastErr = err;
+      retryCount++;
+      logger.warn(`AI model "${currentModel}" failed (attempt ${i + 1}/${models.length})`, err);
+    }
+  }
+
+  const durationMs = Date.now() - t0;
+
+  if (providerResult) {
+    try {
+      const parsed = extractJson(providerResult.text) as Record<string, unknown>;
+
+      const requirements = requirementsSchema.parse({
+        service_category: typeof parsed.service_category === "string" ? parsed.service_category : null,
+        required_skills: toStringArray(parsed.required_skills),
+        location: typeof parsed.location === "string" ? parsed.location : null,
+        budget: coerceBudget(parsed.budget),
+        urgency: normalizeUrgency(parsed.urgency),
+        missing_information: toStringArray(parsed.missing_information),
+        search_ready: Boolean(parsed.search_ready),
+      }) as ExtractedRequirements;
+
+      // Recompute readiness server-side; never trust the model blindly.
+      requirements.search_ready = Boolean(requirements.service_category && requirements.location);
+      requirements.missing_information = [];
+      if (!requirements.service_category) requirements.missing_information.push("service category");
+      if (!requirements.location) requirements.missing_information.push("service area");
+
+      const reply =
+        typeof parsed.reply === "string" && parsed.reply.trim().length > 0
+          ? parsed.reply.trim().slice(0, 600)
+          : fallback.reply;
+
+      const estimatedCost = calculateEstimatedCost(
+        successfulModel,
+        providerResult.inputTokens,
+        providerResult.outputTokens,
+        config,
+      );
+
+      // Sanitize metadata
+      const userText = input.messages
+        .filter((m) => m.role === "user")
+        .map((m) => m.content)
+        .join(" ");
+
+      void logAiActivity({
+        requestId,
+        correlationId,
+        feature: featureName,
+        provider: env.ai.provider,
+        model: successfulModel,
+        operation: "parse_request",
+        status: retryCount > 0 ? "FALLBACK" : "SUCCESS",
+        durationMs,
+        inputTokens: providerResult.inputTokens,
+        outputTokens: providerResult.outputTokens,
+        tokensEstimated: providerResult.tokensEstimated,
+        estimatedCost,
+        retryCount,
+        fallbackUsed: retryCount > 0,
+        fallbackReason: retryCount > 0 ? `Primary model failed, succeeded with fallback model "${successfulModel}"` : undefined,
+        userId: input.userId,
+        userRole: input.userRole,
+        metadata: {
+          inputMessageCount: input.messages.length,
+          sanitizedSnippet: redactSensitiveText(userText.slice(0, 120)),
+          categoryDetected: requirements.service_category,
+          searchReady: requirements.search_ready,
+        },
+      });
+
+      return { reply, requirements, degraded: false, requestId };
+    } catch (parseErr) {
+      lastErr = parseErr;
+      logger.warn("Schema validation or JSON parsing failed on provider output", parseErr);
+    }
+  }
+
+  // If execution reaches here, provider or schema extraction failed. Use deterministic heuristic fallback.
+  const classified = classifyError(lastErr);
+  void logAiActivity({
+    requestId,
+    correlationId,
+    feature: featureName,
+    provider: env.ai.provider,
+    model: models[0] || "unknown",
+    operation: "parse_request",
+    status: "FALLBACK",
+    durationMs,
+    inputTokens: 0,
+    outputTokens: 0,
+    tokensEstimated: false,
+    estimatedCost: 0,
+    retryCount,
+    fallbackUsed: true,
+    fallbackReason: `Provider failure: ${classified.safeMessage}`,
+    errorCategory: classified.category,
+    errorCode: classified.code,
+    errorMessage: classified.safeMessage,
+    userId: input.userId,
+    userRole: input.userRole,
+    metadata: {
+      categoryDetected: fallback.requirements.service_category,
+      searchReady: fallback.requirements.search_ready,
+    },
+  });
+
+  return { ...fallback, degraded: true, requestId };
 }
 
 export default parseRequest;

@@ -25,8 +25,9 @@ export default function Home() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const { openChat } = useChat();
-  const { location } = useLocation();
-  const [query, setQuery] = useState("");
+  const { location, setLocation } = useLocation();
+  const [problem, setProblem] = useState("");
+  const [searchLoc, setSearchLoc] = useState(location || "Kolhapur");
   const [categories, setCategories] = useState<ServiceCategory[]>([]);
   const [workers, setWorkers] = useState<PublicWorker[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,8 +51,15 @@ export default function Home() {
 
   function onSearch(e: FormEvent) {
     e.preventDefault();
-    const q = query.trim();
-    navigate(q ? `/discover${qs({ q })}` : "/discover");
+    const q = problem.trim();
+    const loc = searchLoc.trim();
+    const params: Record<string, string> = {};
+    if (q) params.q = q;
+    if (loc) {
+      params.location = loc;
+      setLocation(loc);
+    }
+    navigate(`/discover${qs(params)}`);
   }
 
   function onAskAI() {
@@ -60,9 +68,8 @@ export default function Home() {
       return;
     }
     openChat();
-    if (query.trim()) {
-      // surface the typed problem in the chat by storing it briefly
-      sessionStorage.setItem("kamle_ai_pending_query", query.trim());
+    if (problem.trim()) {
+      sessionStorage.setItem("kamle_ai_pending_query", problem.trim());
     }
   }
 
@@ -72,51 +79,59 @@ export default function Home() {
       <section className="border-b border-line bg-gradient-to-b from-brand-light via-white to-white">
         <div className="container-x pb-12 pt-12 text-center md:pt-16">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-ai-light px-3 py-1 text-xs font-semibold text-ai">
-            <Sparkles size={13} /> AI-powered local worker discovery
+            <Sparkles size={13} /> Verified Local Skilled Workers
           </span>
           <h1 className="mx-auto mt-4 max-w-2xl text-3xl font-extrabold tracking-tight text-center md:text-5xl">
-            Find the Right Worker for <span className="text-brand-600">Any Problem</span>
+            Find the Right Worker for <span className="text-brand-600">Your Problem</span>
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-muted md:text-lg">
-            Describe your problem, discover suitable local professionals, and connect with the right person.
+            Describe what's broken or what you need done, enter your location, and connect with trusted local professionals.
           </p>
 
-          <form onSubmit={onSearch} className="mx-auto mt-8 max-w-2xl">
-            <div className="card flex flex-col gap-2 p-2 shadow-lift sm:flex-row">
-              <div className="flex flex-1 items-center gap-2 px-3">
+          <form onSubmit={onSearch} className="mx-auto mt-8 max-w-3xl">
+            <div className="card flex flex-col gap-3 p-3 shadow-lift sm:flex-row sm:items-center">
+              <div className="flex flex-1 items-center gap-2 px-3 border-b border-line pb-2 sm:border-b-0 sm:border-r sm:pb-0">
                 <Search size={18} className="shrink-0 text-muted" />
                 <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Describe your problem..."
+                  value={problem}
+                  onChange={(e) => setProblem(e.target.value)}
+                  placeholder="Problem: e.g. My kitchen tap is leaking continuously"
                   className="w-full bg-transparent py-2.5 text-base outline-none placeholder:text-slate-400"
-                  aria-label="Describe your problem"
+                  aria-label="Service problem description"
+                />
+              </div>
+              <div className="flex items-center gap-2 px-3 sm:w-48">
+                <MapPin size={18} className="shrink-0 text-brand-600" />
+                <input
+                  value={searchLoc}
+                  onChange={(e) => setSearchLoc(e.target.value)}
+                  placeholder="Location (e.g. Kolhapur)"
+                  className="w-full bg-transparent py-2.5 text-base outline-none placeholder:text-slate-400"
+                  aria-label="Location"
                 />
               </div>
               <div className="flex gap-2">
-                <Button type="submit" size="lg" className="flex-1 sm:flex-none">
-                  Search <ArrowRight size={18} />
-                </Button>
-                <Button type="button" variant="ai" size="lg" onClick={onAskAI}>
-                  <Sparkles size={18} /> Ask AI
+                <Button type="submit" size="lg" className="w-full sm:w-auto">
+                  Find Workers <ArrowRight size={18} />
                 </Button>
               </div>
             </div>
             <div className="mt-3 flex items-center justify-center gap-2 text-xs text-muted">
               <MapPin size={13} />
               <span>
-                Serving <span className="font-semibold text-ink">{location}</span> and nearby areas
+                Serving <span className="font-semibold text-ink">{searchLoc || location}</span> and surrounding areas
               </span>
             </div>
           </form>
 
           <div className="mx-auto mt-5 flex max-w-2xl flex-wrap items-center justify-center gap-2">
-            <span className="text-xs font-medium text-muted">Try:</span>
+            <span className="text-xs font-medium text-muted">Examples:</span>
             {EXAMPLES.map((ex) => (
               <button
                 key={ex}
+                type="button"
                 onClick={() => {
-                  setQuery(ex);
+                  setProblem(ex);
                 }}
                 className="rounded-full border border-line bg-white px-3 py-1.5 text-xs font-medium text-muted transition hover:border-brand-300 hover:text-brand-700"
               >

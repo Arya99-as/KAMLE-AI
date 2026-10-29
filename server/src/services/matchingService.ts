@@ -80,12 +80,22 @@ function buildCandidateQuery(criteria: MatchCriteria): Record<string, unknown> {
     query.serviceAreas = { $regex: escapeRegex(criteria.location.trim()), $options: "i" };
   }
   if (criteria.text && criteria.text.trim()) {
-    const re = escapeRegex(criteria.text.trim());
-    query.$or = [
-      { professionalDescription: { $regex: re, $options: "i" } },
-      { skills: { $regex: re, $options: "i" } },
-      { serviceCategories: { $regex: re, $options: "i" } },
-    ];
+    // Only constrain by free-text if category and skills were not already identified.
+    // If category or skills are already specified, those accurately restrict the trade,
+    // and matching the full user problem description against worker profile text would return zero candidates.
+    if (!criteria.category && (!criteria.skills || criteria.skills.length === 0)) {
+      const trimmed = criteria.text.trim();
+      const keywords = trimmed
+        .split(/\s+/)
+        .map((w) => w.replace(/[^\w]/g, ""))
+        .filter((w) => w.length > 2);
+      const pattern = keywords.length > 0 ? keywords.map(escapeRegex).join("|") : escapeRegex(trimmed);
+      query.$or = [
+        { professionalDescription: { $regex: pattern, $options: "i" } },
+        { skills: { $regex: pattern, $options: "i" } },
+        { serviceCategories: { $regex: pattern, $options: "i" } },
+      ];
+    }
   }
   return query;
 }

@@ -1,35 +1,68 @@
-import { Briefcase, Check, Inbox, MapPin, MessageSquare, Star, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { listEnquiries, updateEnquiryStatus } from "../../services/api";
+import {
+  AlertCircle,
+  Check,
+  Clock,
+  Play,
+  RefreshCw,
+  ShieldCheck,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
+import {
+  getWorkerEarnings,
+  listEnquiries,
+  submitWorkerProfile,
+  updateEnquiryStatus,
+} from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
-import type { Enquiry } from "../../types";
-import { Badge, Button, Chip, Modal, PageHeader, Spinner, StatusBadge, Tabs } from "../../components/ui/primitives";
+import type { Enquiry, Payout } from "../../types";
+import { Badge, Button, Field, Input, Modal, Spinner, StatusBadge, Tabs } from "../../components/ui/primitives";
 import { EmptyState } from "../../components/ui/states";
-import { formatPrice } from "../../lib/utils";
 
 function otherParty(e: Enquiry, meId: string) {
   const ref = String(e.customerId) === meId ? e.workerId : e.customerId;
-  return typeof ref === "string" ? { _id: ref, name: "User" } : ref;
+  return typeof ref === "string" ? { _id: ref, name: "Customer" } : ref;
 }
 
 export default function WorkerDashboard() {
-  const navigate = useNavigate();
   const { user, workerProfile } = useAuth();
   const meId = user?.id ?? "";
 
-  const [tab, setTab] = useState("Overview");
+  const [tab, setTab] = useState("Requests");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [received, setReceived] = useState<Enquiry[]>([]);
+  const [earningsStats, setEarningsStats] = useState({
+    totalGrossEarnings: 0,
+    totalCommissionDeducted: 0,
+    netPayable: 0,
+    totalPaidOut: 0,
+    pendingPayouts: 0,
+  });
+  const [payouts, setPayouts] = useState<Payout[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const [completeModalEnquiry, setCompleteModalEnquiry] = useState<Enquiry | null>(null);
+  const [finalAmount, setFinalAmount] = useState<number>(500);
+  const [completeLoading, setCompleteLoading] = useState(false);
+
+  const [resubmitLoading, setResubmitLoading] = useState(false);
+
   const load = useCallback(async () => {
-    setLoading(true);
     try {
-      const [r] = await Promise.all([listEnquiries("received")]);
+      const [r, e] = await Promise.all([
+        listEnquiries("received"),
+        getWorkerEarnings().catch(() => ({ success: false, stats: null, payouts: [] })),
+      ]);
       setReceived(r.items);
+      if (e.success && e.stats) {
+        setEarningsStats(e.stats);
+        setPayouts(e.payouts || []);
+      }
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -38,297 +71,418 @@ export default function WorkerDashboard() {
   }, [load]);
 
   const profile = workerProfile;
-  const status = profile?.approvalStatus ?? (workerProfile === null ? "requires_setup" : "draft");
+  const approvalStatus = profile?.approvalStatus ?? "pending";
+  const isApproved = approvalStatus === "approved";
+  const isRejected = approvalStatus === "rejected";
+  const isPending = approvalStatus === "pending" || approvalStatus === "draft";
 
-  const stats = useMemo(
-    () => [
-      { label: "New enquiries", value: received.filter((e) => e.status === "sent").length, icon: <Inbox size={20} /> },
-      { label: "Accepted", value: received.filter((e) => e.status === "accepted").length, icon: <Check size={20} /> },
-      { label: "Completed", value: received.filter((e) => e.status === "completed").length, icon: <Briefcase size={20} /> },
-      { label: "Reviews", value: profile?.ratingCount ?? 0, icon: <Star size={20} /> },
-    ],
-    [received, profile],
-  );
-
-  async function updateStatus(id: string, next: string) {
+  async function updateStatus(id: string, next: string, note?: string, serviceAmount?: number) {
     setActionError(null);
     try {
-      await updateEnquiryStatus(id, next);
+      await updateEnquiryStatus(id, next, note, serviceAmount);
       await load();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Could not update the enquiry.");
     }
   }
 
-  const [detail, setDetail] = useState<Enquiry | null>(null);
+  async function handleMarkCompleteSubmit(ev: FormEvent) {
+    ev.preventDefault();
+    if (!completeModalEnquiry) return;
+    setCompleteLoading(true);
+    try {
+      await updateEnquiryStatus(
+        completeModalEnquiry._id,
+        "COMPLETED",
+        `Work completed. Billed amount: ₹${finalAmount}`,
+        finalAmount
+      );
+      setCompleteModalEnquiry(null);
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not complete request");
+    } finally {
+      setCompleteLoading(false);
+    }
+  }
 
-  type StatusInfo = { label: string; tone: "success" | "warning" | "danger" | "muted"; text: string };
-  const statusCards: Record<string, StatusInfo> = {
-    requires_setup: { label: "No profile yet", tone: "muted", text: "Create your worker profile to start receiving jobs." },
-    draft: { label: "Draft", tone: "muted", text: "Your profile is saved as a draft. Submit it for review when ready." },
-    pending: { label: "Pending review", tone: "warning", text: "An admin is reviewing your profile. Pending profiles don't appear in public search." },
-    approved: { label: "Approved", tone: "success", text: "You're live! Customers can now find and contact you." },
-    rejected: { label: "Rejected", tone: "danger", text: profile?.rejectionReason ? `Reason: ${profile.rejectionReason}` : "Your profile was rejected. Review the reason and resubmit." },
-  };
-  const statusInfo = (statusCards[status] ?? statusCards.draft) as StatusInfo;
+  async function handleResubmitProfile() {
+    setResubmitLoading(true);
+    try {
+      await submitWorkerProfile();
+      alert("Profile submitted for verification review!");
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not resubmit profile");
+    } finally {
+      setResubmitLoading(false);
+    }
+  }
 
   return (
     <div className="container-x py-8">
-      <PageHeader title={`Welcome, ${user?.name?.split(" ")[0] ?? "Worker"}`} subtitle="Manage your profile and incoming job enquiries." />
-
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-line bg-white p-5">
-        <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-50 text-brand-600">
-            <Briefcase size={18} />
-          </span>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold">Worker profile</span>
-              <Badge tone={statusInfo.tone}>{statusInfo.label}</Badge>
-            </div>
-            <p className="mt-1 max-w-xl text-sm text-muted">{statusInfo.text}</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => navigate("/worker/onboarding")}>
-            {status === "rejected" ? "Edit & resubmit" : "Edit profile"}
-          </Button>
-        </div>
-      </div>
-
-      {actionError && <p className="mb-4 rounded-lg bg-danger-light px-3 py-2 text-sm text-danger">{actionError}</p>}
-
-      <Tabs tabs={["Overview", "Received enquiries", "Reviews", "Profile summary"]} active={tab} onChange={setTab} />
-
-      {/* Overview */}
-      {tab === "Overview" && (
-        <div className="mt-6">
-          {loading ? (
-            <Spinner className="mt-10" />
-          ) : (
-            <>
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-                {stats.map((s) => (
-                  <div key={s.label} className="card flex items-center gap-4 p-5">
-                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600">{s.icon}</span>
-                    <div>
-                      <div className="text-2xl font-bold leading-none">{s.value}</div>
-                      <div className="mt-1 text-xs text-muted">{s.label}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-6 card p-5">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-bold">New enquiries</h2>
-                  <Button variant="ghost" size="sm" onClick={() => setTab("Received enquiries")}>
-                    View all
-                  </Button>
-                </div>
-                {received.filter((e) => e.status === "sent").length === 0 ? (
-                  <p className="mt-3 text-sm text-muted">You'll see new job enquiries here when customers contact you.</p>
-                ) : (
-                  <ul className="mt-3 divide-y divide-line">
-                    {received
-                      .filter((e) => e.status === "sent")
-                      .slice(0, 5)
-                      .map((e) => (
-                        <li key={e._id} className="flex items-center justify-between gap-3 py-3">
-                          <div>
-                            <p className="text-sm font-semibold">{otherParty(e, meId).name}</p>
-                            <p className="mt-0.5 line-clamp-1 text-xs text-muted">{e.problemDescription}</p>
-                          </div>
-                          <StatusBadge status={e.status} />
-                        </li>
-                      ))}
-                  </ul>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Received enquiries */}
-      {tab === "Received enquiries" && (
-        <div className="mt-6">
-          {loading ? (
-            <Spinner className="mt-10" />
-          ) : received.length === 0 ? (
-            <EmptyState icon={<Inbox size={28} />} title="No enquiries yet" message="When customers send enquiries, they'll appear here to accept or decline." />
-          ) : (
-            <ul className="space-y-3">
-              {received.map((e) => {
-                const customer = otherParty(e, meId);
-                return (
-                  <li key={e._id} className="card p-5">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold">
-                          {customer.name} <StatusBadge status={e.status} />
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted">
-                          {e.serviceCategory} · {e.location || "Location unshared"}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="secondary" size="sm" onClick={() => setDetail(e)}>
-                          View
-                        </Button>
-                        {(e.status === "sent" || e.status === "accepted") && (
-                          <>
-                            <Button size="sm" onClick={() => void updateStatus(e._id, "completed")} disabled={e.status !== "accepted"}>
-                              <Check size={14} /> Complete
-                            </Button>
-                            {e.status === "sent" && (
-                              <Button variant="secondary" size="sm" onClick={() => void updateStatus(e._id, "declined")}>
-                                <X size={14} /> Decline
-                              </Button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <p className="mt-3 text-sm text-muted">{e.problemDescription}</p>
-                    <p className="mt-2 text-xs text-muted">Sent {new Date(e.createdAt).toLocaleString()}</p>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {/* Reviews */}
-      {tab === "Reviews" && (
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <div className="card p-5">
-            <h2 className="font-bold">What customers say</h2>
-            {!profile || (profile.ratingCount ?? 0) === 0 ? (
-              <p className="mt-3 text-sm text-muted">No reviews yet. Keep doing great work!</p>
-            ) : (
-              <>
-                <div className="mt-3 flex items-center gap-2">
-                  <span className="text-3xl font-bold">{profile.ratingAverage.toFixed(1)}</span>
-                  <div>
-                    <span className="inline-flex gap-0.5">
-                      {[1, 2, 3, 4, 5].map((i) => (
-                        <Star key={i} size={16} className={i <= Math.round(profile.ratingAverage) ? "fill-amber-400 text-amber-400" : "text-slate-300"} />
-                      ))}
-                    </span>
-                    <p className="text-xs text-muted">based on {profile.ratingCount} review{profile.ratingCount > 1 ? "s" : ""}</p>
-                  </div>
-                </div>
-                <p className="mt-3 text-sm text-muted">Approved reviews appear on your public profile.</p>
-              </>
-            )}
-          </div>
-          <div className="card p-5">
-            <h2 className="font-bold">For a great profile</h2>
-            <p className="mt-3 text-sm text-muted">
-              Do '<em>yes</em>' to every enquiry; complete jobs on time; and politely decline or reschedule when busy. Customers can only review you after a completed
-              enquiry.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Profile summary */}
-      {tab === "Profile summary" && (
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <div className="card p-5">
-            <h2 className="mb-3 font-bold">Services</h2>
-            <div className="flex flex-wrap gap-2">
-              {profile?.serviceCategories.map((c) => (
-                <Chip key={c}>{c}</Chip>
-              ))}
-              {profile?.skills.map((s) => (
-                <Chip key={s}>{s}</Chip>
-              ))}
+      {isRejected && (
+        <div className="mb-6 rounded-card border border-red-200 bg-red-50 p-4 text-red-900 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={20} className="text-red-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-sm">Profile Verification Rejected by Admin</p>
+              <p className="text-xs text-red-700 mt-0.5">
+                {profile?.rejectionReason || "Please update your details and resubmit for verification."}
+              </p>
             </div>
           </div>
-          <div className="card p-5">
-            <h2 className="mb-3 font-bold">Availability & pricing</h2>
-            <p className="flex items-center gap-2 text-sm">
-              <MapPin size={15} className="text-muted" /> {profile?.serviceAreas.join(", ") || "No areas listed"}
-            </p>
-            <p className="mt-2 text-sm font-semibold">{profile ? formatPrice(profile.pricing) : "No pricing set"}</p>
-            {profile?.availability.availableNow && <Badge tone="success" className="mt-2">Available now</Badge>}
-            {profile?.availability.days.length ? <p className="mt-2 text-xs text-muted">Working days: {profile.availability.days.join(", ")}</p> : null}
-          </div>
-          <div className="card p-5">
-            <h2 className="mb-2 font-bold">Description</h2>
-            <p className="text-sm text-muted">{profile?.professionalDescription || "Not described yet."}</p>
-            <p className="mt-2 text-sm text-muted">
-              <Star size={14} className="mr-1 inline" />
-              <span className="font-semibold">{profile?.experienceYears ?? 0} years</span> experience
-            </p>
-          </div>
-          <div className="card p-5">
-            <h2 className="mb-2 font-bold">Verification</h2>
-            <p className="text-sm text-muted">
-              Status: <span className="font-semibold capitalize">{profile?.verificationStatus ?? "unverified"}</span>
-            </p>
-            <Button variant="secondary" size="sm" className="mt-3" onClick={() => navigate("/worker/onboarding")}>
-              Manage documents
+          <div className="flex gap-2">
+            <Link to="/onboarding">
+              <Button variant="secondary" size="sm" className="bg-white">
+                Edit Profile
+              </Button>
+            </Link>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleResubmitProfile}
+              disabled={resubmitLoading}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {resubmitLoading ? "Submitting..." : "Resubmit Profile"}
             </Button>
           </div>
         </div>
       )}
 
-      {/* Enquiry detail modal */}
-      <Modal open={Boolean(detail)} onClose={() => setDetail(null)} title="Enquiry details">
-        {detail && (
-          <div className="space-y-3 text-sm">
-            <p>
-              <span className="font-bold">From:</span> {otherParty(detail, meId).name}
-            </p>
-            <p>
-              <span className="font-bold">Problem:</span> <span className="text-muted">{detail.problemDescription}</span>
-            </p>
-            <p>
-              <span className="font-bold">Category:</span> {detail.serviceCategory}
-            </p>
-            <p>
-              <span className="font-bold">Location:</span> {detail.location || "Not shared"}
-            </p>
-            <div className="flex gap-2 pt-2">
-              {detail.status === "sent" && (
-                <>
-                  <Button
-                    className="flex-1"
-                    onClick={() => {
-                      setDetail(null);
-                      void updateStatus(detail._id, "accepted");
-                    }}
-                  >
-                    <Check size={15} /> Accept
-                  </Button>
-                  <Button variant="secondary" className="flex-1" onClick={() => setDetail(null)}>
-                    Close
-                  </Button>
-                </>
-              )}
-              {detail.status === "accepted" && (
-                <Button
-                  className="flex-1"
-                  onClick={() => {
-                    setDetail(null);
-                    void updateStatus(detail._id, "completed");
-                  }}
-                >
-                  <Check size={15} /> Mark completed
-                </Button>
-              )}
+      {isPending && (
+        <div className="mb-6 rounded-card border border-amber-200 bg-amber-50 p-4 text-amber-900 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Clock size={20} className="text-amber-600 shrink-0" />
+            <div>
+              <p className="font-bold text-sm">Verification Under Review</p>
+              <p className="text-xs text-amber-700">
+                Your profile has been submitted and is currently being verified by an admin. Once approved, you will appear in public worker search results.
+              </p>
             </div>
           </div>
-        )}
-      </Modal>
+          <Link to="/onboarding">
+            <Button variant="secondary" size="sm" className="bg-white">
+              Edit Details
+            </Button>
+          </Link>
+        </div>
+      )}
 
-      <div className="mt-10 flex items-center justify-center gap-2 text-xs text-muted">
-        <MessageSquare size={14} /> Pending? You can still chat with KAMLE AI for guidance.
+      {isApproved && (
+        <div className="mb-6 rounded-card border border-emerald-200 bg-emerald-50 p-3 text-emerald-900 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={18} className="text-emerald-600" />
+            <span className="font-bold text-xs">Verified Professional Account — Public and Ready for Client Requests</span>
+          </div>
+          <Link to="/onboarding" className="text-xs font-semibold text-emerald-800 hover:underline">
+            Manage Profile →
+          </Link>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-ink">Worker Dashboard</h1>
+          <p className="text-sm text-muted">Manage incoming service requests, job progress, and your payouts</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button variant="secondary" size="sm" onClick={() => load()} disabled={refreshing}>
+            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} /> Refresh
+          </Button>
+          <Link to="/onboarding">
+            <Button variant="primary" size="sm">
+              Edit Profile
+            </Button>
+          </Link>
+        </div>
       </div>
+
+      {actionError && (
+        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+          {actionError}
+        </div>
+      )}
+
+      <div className="mt-6">
+        <Tabs
+          tabs={["Requests", "Earnings", "Profile"]}
+          active={tab}
+          onChange={setTab}
+        />
+      </div>
+
+      {loading ? (
+        <div className="py-20 text-center">
+          <Spinner />
+        </div>
+      ) : (
+        <div className="mt-6">
+          {tab === "Requests" && (
+            <div>
+              {received.length === 0 ? (
+                <EmptyState
+                  title="No requests yet"
+                  message="When clients discover your verified profile and send service enquiries, they will appear here."
+                />
+              ) : (
+                <div className="space-y-4">
+                  {received.map((e) => {
+                    const st = String(e.status).toUpperCase();
+                    const customer = otherParty(e, meId);
+                    const isPending = st === "PENDING" || st === "SENT";
+                    const isAccepted = st === "ACCEPTED";
+                    const isInProgress = st === "IN_PROGRESS";
+                    const isPaid = e.paymentStatus === "PAID";
+                    const isDisputed = st === "DISPUTED";
+
+                    return (
+                      <div key={e._id} className="card p-5 transition hover:border-brand-200">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-ink">{customer.name}</span>
+                              <Badge tone="brand">{e.serviceCategory}</Badge>
+                              <StatusBadge status={e.status} />
+                              {isPaid && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
+                                  <Check size={12} /> Paid by Client
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-2 text-sm text-ink">{e.problemDescription}</p>
+                            {e.location && <p className="mt-1 text-xs text-muted">📍 Client Address: {e.location}</p>}
+                            {e.serviceAmount ? (
+                              <p className="mt-1 text-xs font-semibold text-brand-700">Service Fee: ₹{e.serviceAmount}</p>
+                            ) : null}
+                            {isDisputed && e.disputeReason && (
+                              <div className="mt-2 rounded-lg bg-amber-50 p-2.5 text-xs text-amber-800 border border-amber-200">
+                                <strong>Client Dispute:</strong> {e.disputeReason}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 sm:flex-col sm:items-end">
+                            {isPending && (
+                              <>
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={() => updateStatus(e._id, "ACCEPTED")}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                >
+                                  <Check size={14} /> Accept Request
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => updateStatus(e._id, "REJECTED")}
+                                  className="text-red-600 hover:bg-red-50"
+                                >
+                                  <X size={14} /> Reject
+                                </Button>
+                              </>
+                            )}
+
+                            {isAccepted && (
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => updateStatus(e._id, "IN_PROGRESS", "Worker started the work")}
+                              >
+                                <Play size={14} /> Start Work
+                              </Button>
+                            )}
+
+                            {isInProgress && (
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => {
+                                  setCompleteModalEnquiry(e);
+                                  setFinalAmount(e.serviceAmount || 500);
+                                }}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                              >
+                                <Check size={14} /> Mark Work Completed
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === "Earnings" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div className="card p-4">
+                  <span className="text-xs font-medium text-muted">Gross Revenue</span>
+                  <p className="mt-1 text-2xl font-bold text-ink">₹{earningsStats.totalGrossEarnings}</p>
+                  <span className="text-xs text-muted">Total service billings</span>
+                </div>
+                <div className="card p-4">
+                  <span className="text-xs font-medium text-muted">Platform Fee</span>
+                  <p className="mt-1 text-2xl font-bold text-muted">₹{earningsStats.totalCommissionDeducted}</p>
+                  <span className="text-xs text-muted">Platform commission (10%)</span>
+                </div>
+                <div className="card p-4 border-brand-200 bg-brand-50/40">
+                  <span className="text-xs font-medium text-brand-700">Net Worker Earnings</span>
+                  <p className="mt-1 text-2xl font-bold text-brand-700">₹{earningsStats.netPayable}</p>
+                  <span className="text-xs text-brand-600">Your total payable amount</span>
+                </div>
+                <div className="card p-4">
+                  <span className="text-xs font-medium text-amber-700">Pending Payouts</span>
+                  <p className="mt-1 text-2xl font-bold text-amber-700">₹{earningsStats.pendingPayouts}</p>
+                  <span className="text-xs text-muted">Awaiting admin transfer</span>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-base font-bold text-ink mb-3">Payout Ledger</h3>
+                {payouts.length === 0 ? (
+                  <div className="card p-8 text-center text-sm text-muted">
+                    No payouts recorded yet. When clients complete payments for your work, payouts are automatically tracked here.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {payouts.map((po) => {
+                      const isPaid = po.status === "PAID";
+                      const isProcessing = po.status === "PROCESSING";
+
+                      return (
+                        <div key={po._id} className="card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-ink text-base">₹{po.workerPayableAmount}</span>
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-xs font-bold ${
+                                  isPaid
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : isProcessing
+                                    ? "bg-blue-100 text-blue-800"
+                                    : "bg-amber-100 text-amber-800"
+                                }`}
+                              >
+                                {po.status}
+                              </span>
+                              <span className="text-xs text-muted">
+                                Gross: ₹{po.serviceAmount} | Comm: -₹{po.commissionAmount}
+                              </span>
+                            </div>
+                            {po.providerPayoutRef && (
+                              <p className="text-xs text-muted mt-1 font-mono">Reference: {po.providerPayoutRef}</p>
+                            )}
+                            <p className="text-xs text-muted">
+                              Created: {new Date(po.createdAt).toLocaleDateString()}
+                              {po.paidAt && ` | Paid: ${new Date(po.paidAt).toLocaleDateString()}`}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="text-xs font-medium text-slate-500">
+                              {isPaid ? "Disbursed to Bank" : "Scheduled for Net-7 Transfer"}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {tab === "Profile" && (
+            <div className="card p-6 space-y-4 max-w-2xl">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-lg text-ink">{user?.name}</h3>
+                <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700">
+                  {approvalStatus.toUpperCase()}
+                </span>
+              </div>
+              <p className="text-sm text-ink">{profile?.professionalDescription || "No bio added yet"}</p>
+              <div>
+                <span className="text-xs font-semibold text-muted block mb-1">Categories:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(profile?.serviceCategories || []).map((c) => (
+                    <Badge key={c} tone="brand">
+                      {c}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <span className="text-xs font-semibold text-muted block mb-1">Skills:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(profile?.skills || []).map((s) => (
+                    <span key={s} className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="pt-2">
+                <Link to="/onboarding">
+                  <Button variant="primary">Edit Full Profile & Pricing</Button>
+                </Link>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {completeModalEnquiry && (
+        <Modal
+          open={Boolean(completeModalEnquiry)}
+          onClose={() => !completeLoading && setCompleteModalEnquiry(null)}
+          title="Mark Work Completed"
+        >
+          <form onSubmit={handleMarkCompleteSubmit} className="space-y-4">
+            <p className="text-xs text-muted">
+              Confirm that the work requested by <strong>{otherParty(completeModalEnquiry, meId).name}</strong> has been finished. Set the final billed service amount for the client to pay.
+            </p>
+
+            <Field label="Final Service Amount (₹)">
+              <Input
+                type="number"
+                min={1}
+                value={finalAmount}
+                onChange={(e) => setFinalAmount(Number(e.target.value) || 0)}
+                required
+              />
+            </Field>
+
+            <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 border border-slate-200">
+              <div className="flex justify-between mb-1">
+                <span>Gross Billing:</span>
+                <span className="font-semibold text-ink">₹{finalAmount}</span>
+              </div>
+              <div className="flex justify-between mb-1">
+                <span>Platform Commission (10%):</span>
+                <span>-₹{Math.round(finalAmount * 0.1)}</span>
+              </div>
+              <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-emerald-700">
+                <span>Your Payout:</span>
+                <span>₹{finalAmount - Math.round(finalAmount * 0.1)}</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={() => setCompleteModalEnquiry(null)} disabled={completeLoading}>
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit" disabled={completeLoading || finalAmount <= 0}>
+                {completeLoading ? "Completing..." : "Confirm & Mark Completed"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }

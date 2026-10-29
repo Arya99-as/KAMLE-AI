@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import ChatSession from "../models/ChatSession.js";
 import parseRequest from "../services/aiService.js";
 import findMatches from "../services/matchingService.js";
+import ApiError from "../utils/ApiError.js";
 import type { ChatMessageInput } from "../validators/chat.js";
 
 const RESULT_LIMIT = 6;
@@ -19,6 +20,8 @@ export async function sendMessage(req: Request<unknown, unknown, ChatMessageInpu
       customerId: customerId ?? undefined,
       messages: [],
     });
+  } else if (customerId && session.customerId && String(session.customerId) !== customerId) {
+    throw ApiError.forbidden("You do not have access to this conversation session");
   }
   if (customerId && !session.customerId) {
     session.customerId = customerId as unknown as typeof session.customerId;
@@ -30,7 +33,12 @@ export async function sendMessage(req: Request<unknown, unknown, ChatMessageInpu
   const window = session.messages.slice(-10);
   const previous = session.extractedRequirements;
 
-  const parsed = await parseRequest({ messages: window, previous });
+  const parsed = await parseRequest({
+    messages: window,
+    previous,
+    userId: customerId ?? undefined,
+    userRole: req.user?.role ?? "customer",
+  });
 
   session.messages.push({ role: "assistant", content: parsed.reply, at: new Date() });
   session.extractedRequirements = parsed.requirements as typeof session.extractedRequirements;

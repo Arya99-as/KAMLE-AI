@@ -77,6 +77,13 @@ export function Badge({ tone = "default", className, children }: { tone?: Tone; 
 
 export function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; tone: Tone }> = {
+    PENDING: { label: "Pending", tone: "warning" },
+    ACCEPTED: { label: "Accepted", tone: "brand" },
+    REJECTED: { label: "Rejected", tone: "danger" },
+    IN_PROGRESS: { label: "In Progress", tone: "brand" },
+    COMPLETED: { label: "Completed", tone: "success" },
+    CANCELLED: { label: "Cancelled", tone: "muted" },
+    DISPUTED: { label: "Disputed", tone: "danger" },
     approved: { label: "Approved", tone: "success" },
     pending: { label: "Pending review", tone: "warning" },
     rejected: { label: "Rejected", tone: "danger" },

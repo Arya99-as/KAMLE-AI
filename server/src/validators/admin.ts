@@ -34,3 +34,14 @@ export const categoryUpdateSchema = categorySchema.partial();
 export const reportStatusSchema = z.object({
   status: z.enum(["open", "reviewing", "resolved", "dismissed"]),
 });
+
+export const resolveDisputeSchema = z.object({
+  resolution: z.enum(["COMPLETED", "CANCELLED"]).optional().default("COMPLETED"),
+  note: z.string().trim().max(1000).optional().default("Dispute resolved by platform admin"),
+});
+
+export const payoutStatusSchema = z.object({
+  status: z.enum(["PENDING", "PROCESSING", "PAID", "FAILED"]),
+  providerPayoutRef: z.string().trim().max(200).optional(),
+  note: z.string().trim().max(500).optional(),
+});

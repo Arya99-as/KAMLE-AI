@@ -33,6 +33,7 @@ const reviewSchema = new Schema<IReview>(
 // One review per completed enquiry, and one review per customer/worker pair.
 reviewSchema.index({ customerId: 1, workerId: 1 }, { unique: true });
 reviewSchema.index({ workerId: 1, moderationStatus: 1, createdAt: -1 });
+reviewSchema.index({ enquiryId: 1 });
 
 export const Review: Model<IReview> =
   (mongoose.models.Review as Model<IReview>) || mongoose.model<IReview>("Review", reviewSchema);

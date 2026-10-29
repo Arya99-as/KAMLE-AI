@@ -36,13 +36,19 @@ export default function WorkerProfilePage() {
   const [sent, setSent] = useState(false);
   const [problem, setProblem] = useState("");
   const [area, setArea] = useState(defaultLocation);
+  const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [modalError, setModalError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     setError(null);
     try {
-      setData(await getWorker(id));
+      const res = await getWorker(id);
+      setData(res);
+      if (res.worker.serviceCategories?.length) {
+        setSelectedCategory(res.worker.serviceCategories[0] ?? "");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "We couldn't load this worker.");
     } finally {
@@ -56,19 +62,22 @@ export default function WorkerProfilePage() {
 
   async function onSubmitEnquiry() {
     if (!data || !id) return;
-    if (problem.trim().length < 10) return;
+    if (problem.trim().length < 10) {
+      setModalError("Please provide a description of at least 10 characters.");
+      return;
+    }
     setSubmitting(true);
+    setModalError(null);
     try {
       await createEnquiry({
         workerId: data.worker.userId,
-        serviceCategory: data.worker.serviceCategories[0] ?? "General",
+        serviceCategory: selectedCategory || data.worker.serviceCategories[0] || "General",
         problemDescription: problem.trim(),
-        location: area.trim(),
+        location: (area || user?.location || "").trim(),
       });
       setSent(true);
-      setEnquiryOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not send the enquiry. Please try again.");
+      setModalError(e instanceof Error ? e.message : "Could not send the enquiry. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -76,11 +85,16 @@ export default function WorkerProfilePage() {
 
   function openEnquiry() {
     if (!isAuthenticated) {
-      navigate("/login");
+      navigate(`/login?from=/workers/${id}`);
       return;
     }
-    if (user?.role !== "customer") return;
+    if (user?.role !== "customer") {
+      setModalError("Only customer accounts can send service enquiries.");
+      setEnquiryOpen(true);
+      return;
+    }
     setSent(false);
+    setModalError(null);
     setEnquiryOpen(true);
   }
 
@@ -178,8 +192,8 @@ export default function WorkerProfilePage() {
                   </a>
                 </>
               )}
-              <Button onClick={openEnquiry} disabled={!isAuthenticated || user?.role !== "customer"}>
-                <Send size={16} /> Send enquiry
+              <Button size="lg" onClick={openEnquiry} className="shadow-sm">
+                <Send size={16} /> Contact Worker
               </Button>
             </div>
           </div>
@@ -318,13 +332,23 @@ export default function WorkerProfilePage() {
       </div>
 
       {/* Enquiry modal */}
-      <Modal open={enquiryOpen} onClose={() => setEnquiryOpen(false)} title={`Send an enquiry to ${worker.name.split(" ")[0]}`}>
+      <Modal open={enquiryOpen} onClose={() => setEnquiryOpen(false)} title={`Contact ${worker.name}`}>
         {sent ? (
-          <div>
-            <p className="text-sm text-success">Enquiry sent.</p>
-            <Button className="mt-4 w-full" onClick={() => setEnquiryOpen(false)}>
-              Close
-            </Button>
+          <div className="space-y-4 py-2">
+            <div className="rounded-xl border border-success bg-success-light p-4 text-center">
+              <p className="font-bold text-success">Enquiry Successfully Sent!</p>
+              <p className="mt-1 text-sm text-ink">
+                Your request has been forwarded to <strong>{worker.name}</strong>. The worker can now review, accept, or decline your enquiry.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={() => navigate("/account/customer")}>
+                View in My Enquiries
+              </Button>
+              <Button variant="secondary" className="flex-1" onClick={() => setEnquiryOpen(false)}>
+                Close
+              </Button>
+            </div>
           </div>
         ) : (
           <form
@@ -334,23 +358,73 @@ export default function WorkerProfilePage() {
             }}
             className="space-y-4"
           >
+            {modalError && (
+              <div className="rounded-lg bg-danger-light p-3 text-sm text-danger">
+                {modalError}
+              </div>
+            )}
+
+            <div className="rounded-lg bg-slate-50 p-3 text-xs text-muted space-y-1">
+              <div>
+                <span className="font-semibold text-ink">Selected Worker:</span> {worker.name}
+              </div>
+              {user && (
+                <div>
+                  <span className="font-semibold text-ink">Your Identity:</span> {user.name} {user.phone ? `(${user.phone})` : ""}
+                </div>
+              )}
+            </div>
+
             <label className="block">
-              <span className="label">What do you need help with?</span>
-              <Textarea rows={4} placeholder="Describe your problem in a few lines..." value={problem} onChange={(e) => setProblem(e.target.value)} required minLength={10} />
+              <span className="label">Required Service</span>
+              <select
+                className="input"
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                required
+              >
+                {worker.serviceCategories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+                {!worker.serviceCategories.length && <option value="General">General Service</option>}
+              </select>
             </label>
+
             <label className="block">
-              <span className="label">Service area</span>
-              <input className="input" value={area} onChange={(e) => setArea(e.target.value)} />
+              <span className="label">Problem Description (min 10 characters)</span>
+              <Textarea
+                rows={4}
+                placeholder="Describe your problem clearly (e.g. Kitchen tap is leaking continuously under the sink)..."
+                value={problem}
+                onChange={(e) => setProblem(e.target.value)}
+                required
+                minLength={10}
+              />
             </label>
+
+            <label className="block">
+              <span className="label">Your Location / Service Area</span>
+              <input
+                className="input"
+                placeholder="e.g. Kolhapur, Pune..."
+                value={area}
+                onChange={(e) => setArea(e.target.value)}
+                required
+              />
+            </label>
+
             <p className="text-xs text-muted">
-              This creates an enquiry record. It does <strong>not</strong> confirm a booking — the worker must accept it. You'll be able to track it in your dashboard.
+              Submitting sends this enquiry directly to {worker.name}. The enquiry will appear in your dashboard with status <strong>Sent</strong>.
             </p>
-            <div className="flex gap-2">
+
+            <div className="flex gap-2 pt-2">
               <Button type="button" variant="secondary" className="flex-1" onClick={() => setEnquiryOpen(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={submitting || problem.trim().length < 10} className="flex-1">
-                {submitting ? "Sending..." : "Send enquiry"}
+                {submitting ? "Sending Enquiry..." : "Send Enquiry"}
               </Button>
             </div>
           </form>

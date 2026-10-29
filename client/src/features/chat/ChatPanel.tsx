@@ -60,7 +60,7 @@ export function ChatPanel() {
     setThinking(true);
 
     try {
-      const res: ChatResponse = await sendChatMessage(sessionKey, text);
+      const res: ChatResponse = await sendChatMessage({ sessionKey, message: text });
       setSessionKey(res.sessionKey);
 
       setBubbles((prev) => [
