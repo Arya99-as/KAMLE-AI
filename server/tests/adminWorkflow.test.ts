@@ -181,7 +181,10 @@ describe("enquiries and reviews", () => {
 
 describe("KAMLE AI chat", () => {
   it("asks for the location when it is missing", async () => {
-    const res = await request(app).post("/api/chat/message").send({ message: "My refrigerator is not cooling" });
+    const res = await request(app)
+      .post("/api/chat/message")
+      .set("Authorization", `Bearer ${customerToken}`)
+      .send({ message: "My refrigerator is not cooling" });
     expect(res.status).toBe(200);
     expect(res.body.requirements.service_category).toBe("Appliance Repair");
     expect(res.body.requirements.search_ready).toBe(false);
@@ -189,9 +192,15 @@ describe("KAMLE AI chat", () => {
   });
 
   it("returns grounded worker results once the location is known", async () => {
-    const first = await request(app).post("/api/chat/message").send({ message: "My refrigerator is not cooling" });
+    const first = await request(app)
+      .post("/api/chat/message")
+      .set("Authorization", `Bearer ${customerToken}`)
+      .send({ message: "My refrigerator is not cooling" });
     const sessionKey = first.body.sessionKey;
-    const res = await request(app).post("/api/chat/message").send({ sessionKey, message: "Kolhapur" });
+    const res = await request(app)
+      .post("/api/chat/message")
+      .set("Authorization", `Bearer ${customerToken}`)
+      .send({ sessionKey, message: "Kolhapur" });
     expect(res.status).toBe(200);
     expect(res.body.requirements.search_ready).toBe(true);
     expect(res.body.requirements.location).toBe("Kolhapur");

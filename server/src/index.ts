@@ -2,6 +2,8 @@ import { createApp } from "./app.js";
 import { connectDB, disconnectDB, syncIndexes } from "./config/db.js";
 import env from "./config/env.js";
 import logger from "./utils/logger.js";
+import User from "./models/User.js";
+import { seedDatabase } from "./seed.js";
 
 async function main() {
   await connectDB();
@@ -9,6 +11,14 @@ async function main() {
   // idempotent Mongoose syncIndexes() pass so deployments never start on a
   // schema without the required indexes.
   await syncIndexes();
+
+  // Auto-seed demo accounts (admin, customer, worker) if database is empty or using in-memory db
+  const userCount = await User.countDocuments();
+  if (userCount === 0) {
+    logger.info("Database is empty. Automatically seeding demo accounts...");
+    await seedDatabase(false);
+  }
+
   const app = createApp();
 
   const server = app.listen(env.port, () => {

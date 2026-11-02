@@ -1,8 +1,8 @@
-import { AlertCircle, CheckCircle2, Clock, Cpu, DollarSign, Layers, Sparkles, TrendingUp, Zap } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Cpu, DollarSign, Filter, Layers, RefreshCw, Sparkles, TrendingUp, Zap } from "lucide-react";
 import { useEffect, useState, useCallback } from "react";
 import { fetchAiOverview } from "../../services/aiAdminApi";
 import type { AiOverviewResponse } from "../../types/aiAdmin";
-import { Badge, Button, Select, Spinner } from "../../components/ui/primitives";
+import { Badge, Button, Spinner } from "../../components/ui/primitives";
 import { EmptyState } from "../../components/ui/states";
 
 export function AiOverviewView() {
@@ -62,49 +62,55 @@ export function AiOverviewView() {
   return (
     <div className="space-y-6">
       {/* Top Filter Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4 border border-line shadow-card">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-bold text-muted uppercase tracking-wider">Filters:</span>
-          <Select
+      <div className="flex flex-row flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4 border border-line shadow-sm">
+        {/* Left Side: Filter Label + Selects all inline */}
+        <div className="flex flex-row flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted">
+            <Filter size={14} className="text-brand-600 shrink-0" />
+            <span>Filters:</span>
+          </div>
+
+          <select
             value={period}
             onChange={(e) => setPeriod(e.target.value as any)}
-            className="h-8 text-xs font-semibold"
+            className="h-9 min-w-[120px] rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-ink transition hover:border-brand-400 focus:border-brand-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 cursor-pointer"
           >
             <option value="today">Today</option>
             <option value="7d">Last 7 Days</option>
             <option value="30d">Last 30 Days</option>
-          </Select>
+          </select>
 
-          <Select
+          <select
             value={featureFilter}
             onChange={(e) => setFeatureFilter(e.target.value)}
-            className="h-8 text-xs font-semibold"
+            className="h-9 min-w-[150px] rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-ink transition hover:border-brand-400 focus:border-brand-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 cursor-pointer"
           >
             <option value="">All AI Features</option>
             <option value="problem_understanding">Problem Understanding</option>
             <option value="worker_matching">Worker Matching</option>
             <option value="ai_search">Marketplace Search</option>
             <option value="evaluation">Model Benchmark</option>
-          </Select>
+          </select>
 
-          <Select
+          <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="h-8 text-xs font-semibold"
+            className="h-9 min-w-[130px] rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-ink transition hover:border-brand-400 focus:border-brand-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 cursor-pointer"
           >
             <option value="">All Statuses</option>
             <option value="SUCCESS">Success Only</option>
             <option value="FAILED">Failed Only</option>
             <option value="FALLBACK">Fallback Only</option>
-          </Select>
+          </select>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Right Side: Operational Status Badge + Apply / Refresh Button */}
+        <div className="flex flex-row flex-wrap items-center gap-3 shrink-0">
           {health ? (
-            <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-1.5 border border-line text-xs">
-              <span className="text-muted font-medium">Provider ({health.provider}):</span>
+            <div className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-1.5 border border-emerald-200 text-xs">
+              <span className="text-slate-600 font-medium">Provider ({health.provider}):</span>
               <span
-                className={`inline-flex items-center gap-1 font-bold ${
+                className={`inline-flex items-center gap-1.5 font-bold ${
                   health.reachable ? "text-emerald-700" : "text-amber-700"
                 }`}
               >
@@ -118,7 +124,13 @@ export function AiOverviewView() {
             </div>
           ) : null}
 
-          <Button variant="secondary" size="sm" onClick={() => loadData()}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => loadData()}
+            className="h-9 px-4 text-xs font-semibold gap-1.5 shadow-sm"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
             Apply
           </Button>
         </div>

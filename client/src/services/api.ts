@@ -97,7 +97,7 @@ export function submitWorkerProfile() {
 /* ----------------------------- chat (AI) -------------------------------- */
 
 export function sendChatMessage(body: { sessionKey?: string; message: string; category?: string; location?: string }) {
-  return api<ChatResponse>("/chat/message", { method: "POST", body, auth: false });
+  return api<ChatResponse>("/chat/message", { method: "POST", body, auth: true });
 }
 
 /* -------------------------- interactions --------------------------------- */

@@ -4,8 +4,15 @@ import { useAuth } from "../../context/AuthContext";
 
 export function FloatingChatButton() {
   const { open, openChat, closeChat } = useChat();
-  const { isAuthenticated } = useAuth();
-  const label = isAuthenticated ? undefined : "Login to chat";
+  const { user, isAuthenticated } = useAuth();
+  // Kamle AI chat is customer-only. Show login prompt only to guests; workers/admins never see it.
+  const isCustomer = user?.role === "customer";
+
+  if (!isCustomer) {
+    return null;
+  }
+
+  const label = !isAuthenticated ? "Login to chat" : "Open KAMLE AI chat";
 
   return (
     <>

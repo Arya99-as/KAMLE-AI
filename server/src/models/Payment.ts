@@ -1,38 +1,70 @@
 import mongoose, { Schema, type Document, type Model, type Types } from "mongoose";
 
 export type PaymentStatus = "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
+export type RefundStatus = "NONE" | "PARTIAL" | "FULL";
+
+export interface IPaymentTransfer {
+  transferId: string;
+  account: string;
+  amount: number;
+  status: string;
+  createdAt?: Date;
+}
 
 export interface IPayment extends Document<Types.ObjectId> {
   enquiryId: Types.ObjectId;
   customerId: Types.ObjectId;
   workerId: Types.ObjectId;
+  categoryName?: string;
   amount: number;
   currency: string;
   commissionPercent: number;
   commissionAmount: number;
   workerPayableAmount: number;
+  refundedAmount: number;
+  refundStatus: RefundStatus;
   status: PaymentStatus;
   provider: string;
   transactionRef: string;
   providerOrderId?: string;
   providerPaymentId?: string;
   paymentMethod?: string;
+  transfers: IPaymentTransfer[];
   verifiedAt?: Date;
   metadata?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 }
 
+const paymentTransferSchema = new Schema<IPaymentTransfer>(
+  {
+    transferId: { type: String, required: true },
+    account: { type: String, required: true },
+    amount: { type: Number, required: true },
+    status: { type: String, default: "created" },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
 const paymentSchema = new Schema<IPayment>(
   {
     enquiryId: { type: Schema.Types.ObjectId, ref: "Enquiry", required: true, index: true },
     customerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     workerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    categoryName: { type: String, default: "" },
     amount: { type: Number, required: true, min: 0 },
     currency: { type: String, default: "INR" },
     commissionPercent: { type: Number, required: true, min: 0, max: 100, default: 10 },
     commissionAmount: { type: Number, required: true, min: 0 },
     workerPayableAmount: { type: Number, required: true, min: 0 },
+    refundedAmount: { type: Number, default: 0, min: 0 },
+    refundStatus: {
+      type: String,
+      enum: ["NONE", "PARTIAL", "FULL"],
+      default: "NONE",
+      index: true,
+    },
     status: {
       type: String,
       enum: ["PENDING", "COMPLETED", "FAILED", "REFUNDED"],
@@ -44,6 +76,7 @@ const paymentSchema = new Schema<IPayment>(
     providerOrderId: { type: String, index: true },
     providerPaymentId: { type: String, index: true },
     paymentMethod: { type: String, default: "upi" },
+    transfers: { type: [paymentTransferSchema], default: [] },
     verifiedAt: { type: Date },
     metadata: { type: Schema.Types.Mixed },
   },

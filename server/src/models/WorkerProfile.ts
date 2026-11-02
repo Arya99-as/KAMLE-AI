@@ -3,6 +3,21 @@ import mongoose, { Schema, type Document, type Model, type Types } from "mongoos
 export type PricingType = "fixed" | "hourly" | "quote";
 export type ApprovalStatus = "draft" | "pending" | "approved" | "rejected";
 export type VerificationStatus = "unverified" | "pending" | "verified" | "rejected";
+export type PayoutAccountStatus = "unconfigured" | "pending" | "verified" | "rejected";
+
+export interface IPayoutAccount {
+  accountHolderName?: string;
+  bankName?: string;
+  accountNumber?: string;
+  ifsc?: string;
+  upiId?: string;
+  linkedAccountId?: string;
+  isVerified: boolean;
+  status: PayoutAccountStatus;
+  rejectionReason?: string;
+  verifiedAt?: Date;
+  verifiedBy?: Types.ObjectId;
+}
 
 export interface IPricing {
   type: PricingType;
@@ -37,6 +52,7 @@ export interface IWorkerProfile extends Document<Types.ObjectId> {
   verificationStatus: VerificationStatus;
   approvalStatus: ApprovalStatus;
   rejectionReason?: string;
+  payoutAccount?: IPayoutAccount;
   ratingAverage: number;
   ratingCount: number;
   completedEnquiries: number;
@@ -68,6 +84,27 @@ const verificationDocSchema = new Schema<IVerificationDoc>(
   { _id: false },
 );
 
+const payoutAccountSchema = new Schema<IPayoutAccount>(
+  {
+    accountHolderName: { type: String, default: "", trim: true },
+    bankName: { type: String, default: "", trim: true },
+    accountNumber: { type: String, default: "", trim: true },
+    ifsc: { type: String, default: "", trim: true, uppercase: true },
+    upiId: { type: String, default: "", trim: true },
+    linkedAccountId: { type: String, default: "", trim: true },
+    isVerified: { type: Boolean, default: false },
+    status: {
+      type: String,
+      enum: ["unconfigured", "pending", "verified", "rejected"],
+      default: "unconfigured",
+    },
+    rejectionReason: { type: String, default: "" },
+    verifiedAt: { type: Date },
+    verifiedBy: { type: Schema.Types.ObjectId, ref: "User" },
+  },
+  { _id: false },
+);
+
 const workerProfileSchema = new Schema<IWorkerProfile>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true, index: true },
@@ -84,6 +121,7 @@ const workerProfileSchema = new Schema<IWorkerProfile>(
     },
     portfolioImages: { type: [String], default: [] },
     verificationDocuments: { type: [verificationDocSchema], default: [] },
+    payoutAccount: { type: payoutAccountSchema, default: () => ({ status: "unconfigured", isVerified: false }) },
     verificationStatus: {
       type: String,
       enum: ["unverified", "pending", "verified", "rejected"],

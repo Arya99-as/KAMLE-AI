@@ -7,6 +7,7 @@ import type { ServiceCategory, WorkerProfile } from "../../types";
 import { Button, Chip, Field, Input, Select, Textarea, Badge, Modal } from "../../components/ui/primitives";
 import { ErrorState } from "../../components/ui/states";
 import { CategoryIcon } from "../../components/icons/CategoryIcon";
+import { Logo } from "../../components/brand/Logo";
 
 const STEPS = ["Personal", "Professional", "Service", "Portfolio", "Review"];
 
@@ -240,9 +241,12 @@ export default function WorkerOnboarding() {
 
   return (
     <div className="container-x max-w-3xl py-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight">Become a KAMLE worker</h1>
-        <p className="mt-1 text-sm text-muted">Complete your profile to be reviewed for approval. Pending profiles appear in the search only after approval.</p>
+      <div className="mb-6 flex items-center gap-3">
+        <Logo size="sm" />
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Become a KAMLE worker</h1>
+          <p className="mt-1 text-sm text-muted">Complete your profile to be reviewed for approval. Pending profiles appear in the search only after approval.</p>
+        </div>
       </div>
 
       <ol className="mb-8 flex items-center justify-between gap-1">

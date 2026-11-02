@@ -1,4 +1,5 @@
 import { ArrowRight, MapPin, MessageSquareText, Search, ShieldCheck, Sparkles, Star, UserCheck, UserSearch } from "lucide-react";
+import { Logo } from "../components/brand/Logo";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { recommendedWorkers, getCategories } from "../services/api";
@@ -23,7 +24,7 @@ const HOW_IT_WORKS = [
 
 export default function Home() {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { openChat } = useChat();
   const { location, setLocation } = useLocation();
   const [problem, setProblem] = useState("");
@@ -64,7 +65,10 @@ export default function Home() {
 
   function onAskAI() {
     if (!isAuthenticated) {
-      navigate("/register");
+      navigate("/login");
+      return;
+    }
+    if (user?.role !== "customer") {
       return;
     }
     openChat();
@@ -78,6 +82,9 @@ export default function Home() {
       {/* Hero */}
       <section className="border-b border-line bg-gradient-to-b from-brand-light via-white to-white">
         <div className="container-x pb-12 pt-12 text-center md:pt-16">
+          <div className="mb-6 flex justify-center">
+            <Logo size="xl" />
+          </div>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-ai-light px-3 py-1 text-xs font-semibold text-ai">
             <Sparkles size={13} /> Verified Local Skilled Workers
           </span>
@@ -254,9 +261,11 @@ export default function Home() {
                 </li>
               ))}
             </ul>
-            <Button variant="ai" className="mt-6" onClick={onAskAI}>
-              <Sparkles size={17} /> Try KAMLE AI chat
-            </Button>
+            {user?.role === "customer" && (
+              <Button variant="ai" className="mt-6" onClick={onAskAI}>
+                <Sparkles size={17} /> Try KAMLE AI chat
+              </Button>
+            )}
           </div>
           <div className="card bg-gradient-to-br from-ai-light to-white p-6">
             <div className="rounded-2xl bg-white p-5 shadow-sm">

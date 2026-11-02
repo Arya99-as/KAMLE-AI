@@ -35,7 +35,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="card p-8">
           <div className="mb-6 flex flex-col items-center text-center">
-            <Logo />
+            <Logo size="md" />
             <h1 className="mt-4 text-xl font-bold">Welcome back</h1>
             <p className="mt-1 text-sm text-muted">Log in to continue to KAMLE AI.</p>
           </div>

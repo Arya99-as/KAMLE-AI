@@ -15,7 +15,7 @@ export async function connectDB(): Promise<string> {
     const mem = await MongoMemoryServer.create();
     memoryServer = mem;
     uri = mem.getUri();
-    logger.info("Using in-memory MongoDB instance (USE_MEMORY_DB=true)");
+    logger.info(`Using in-memory MongoDB instance: ${uri}`);
   }
 
   mongoose.set("strictQuery", true);

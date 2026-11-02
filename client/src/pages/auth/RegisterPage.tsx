@@ -38,7 +38,7 @@ export default function RegisterPage() {
       <div className="w-full max-w-md">
         <div className="card p-8">
           <div className="mb-6 flex flex-col items-center text-center">
-            <Logo />
+            <Logo size="md" />
             <h1 className="mt-4 text-xl font-bold">Create your account</h1>
             <p className="mt-1 text-sm text-muted">One account for every role on KAMLE AI.</p>
           </div>

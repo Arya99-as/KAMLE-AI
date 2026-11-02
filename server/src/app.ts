@@ -44,6 +44,19 @@ export function createApp(): Express {
   // Serve uploaded portfolio images / documents.
   app.use("/uploads", express.static(path.resolve(uploadRoot), { maxAge: "7d" }));
 
+  app.get("/", (_req, res) => {
+    res.json({
+      status: "ok",
+      name: "KAMLE AI API",
+      message: "Backend server is running. Access the frontend app at http://localhost:5174/",
+      version: "1.0.0",
+    });
+  });
+
+  app.get("/.well-known/appspecific/com.chrome.devtools.json", (_req, res) => {
+    res.status(204).end();
+  });
+
   app.use("/api", generalLimiter, apiRoutes);
 
   app.use(notFoundHandler);

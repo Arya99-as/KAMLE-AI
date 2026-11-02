@@ -10,8 +10,15 @@ export interface IPayout extends Document<Types.ObjectId> {
   commissionAmount: number;
   workerPayableAmount: number;
   status: PayoutStatus;
+  method?: "route" | "manual";
   providerPayoutRef?: string;
+  linkedAccountId?: string;
+  transferId?: string;
+  transferStatus?: string;
+  approvedBy?: Types.ObjectId;
+  approvedAt?: Date;
   paidAt?: Date;
+  failureReason?: string;
   note?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -31,8 +38,15 @@ const payoutSchema = new Schema<IPayout>(
       default: "PENDING",
       index: true,
     },
+    method: { type: String, enum: ["route", "manual"], default: "manual" },
     providerPayoutRef: { type: String, default: "" },
+    linkedAccountId: { type: String, default: "" },
+    transferId: { type: String, default: "", index: true },
+    transferStatus: { type: String, default: "" },
+    approvedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    approvedAt: { type: Date },
     paidAt: { type: Date },
+    failureReason: { type: String, default: "" },
     note: { type: String, default: "", maxlength: 500 },
   },
   { timestamps: true },

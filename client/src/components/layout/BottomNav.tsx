@@ -5,20 +5,24 @@ import { useAuth } from "../../context/AuthContext";
 
 export function BottomNav() {
   const { openChat } = useChat();
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  // KAMLE AI chat is a customer-only feature.
+  const isCustomer = user?.role === "customer";
 
   const items = [
     { label: "Home", icon: <Home size={20} />, to: "/", end: true },
     { label: "Discover", icon: <Search size={20} />, to: "/discover", end: false },
-    { label: "AI", icon: <Sparkles size={20} />, to: "", end: false },
+    ...(isCustomer
+      ? [{ label: "AI", icon: <Sparkles size={20} />, to: "", end: false }]
+      : []),
     { label: "Saved", icon: <Heart size={20} />, to: "/account?tab=favorites", end: false },
     { label: "Account", icon: <UserRound size={20} />, to: "/account", end: false },
   ];
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 backdrop-blur md:hidden" aria-label="Bottom navigation">
-      <div className="grid grid-cols-5">
+      <div className={`grid ${items.length === 5 ? "grid-cols-5" : "grid-cols-4"} gap-0`}>
         {items.map((item) =>
           item.label === "AI" ? (
             <button

@@ -27,7 +27,9 @@ const SUGGESTIONS = ["My refrigerator is not cooling", "I need an electrician to
 
 export function ChatPanel() {
   const { open, closeChat } = useChat();
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+
+  if (!open || user?.role !== "customer") return null;
   const [bubbles, setBubbles] = useState<(Bubble | ResultBubble)[]>([{ role: "assistant", content: GREETING }]);
   const [input, setInput] = useState("");
   const [sessionKey, setSessionKey] = useState<string | undefined>();

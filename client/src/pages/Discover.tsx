@@ -42,7 +42,7 @@ export default function Discover() {
       sort: params.get("sort") ?? "relevance",
       page: Number(params.get("page")) || 1,
     }),
-    [], // eslint-disable-line react-hooks/exhaustive-deps
+    [],
   );
 
   const [filters, setFiltersState] = useState<Filters>(initial);
@@ -64,7 +64,6 @@ export default function Discover() {
       void load();
     }, 250);
     return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
 
   async function load() {
@@ -83,7 +82,6 @@ export default function Discover() {
         limit: 12,
       });
       setResult(data);
-      // Keep the URL in sync for sharing.
       setParams(
         {
           q: filters.q || "",
@@ -111,157 +109,151 @@ export default function Discover() {
   }
 
   return (
-    <div className="container-x py-6">
-      <div className="mb-5 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Discover workers</h1>
-          <p className="mt-1 text-sm text-muted">Browse approved local professionals. No pending or rejected profiles are shown.</p>
-        </div>
-        <Button variant="secondary" className="lg:hidden" onClick={() => setMobileFilters((v) => !v)}>
-          <SlidersHorizontal size={16} /> Filters
-          {hasActiveFilters && <Badge tone="brand">{1}</Badge>}
-        </Button>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-        {/* Filters sidebar */}
-        <aside className={`${mobileFilters ? "block" : "hidden"} lg:block`}>
-          <div className="card sticky top-20 space-y-4 p-5">
-            <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-sm font-bold">
-                <Filter size={16} /> Filters
-              </h2>
-              {hasActiveFilters && (
-                <button onClick={clearAll} className="text-xs font-semibold text-brand-700 hover:underline">
-                  Clear all
-                </button>
-              )}
+    <div className="min-h-screen bg-slate-50/60">
+      <div className="border-b border-line bg-white">
+        <div className="container-x flex flex-col gap-4 py-6 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="text-2xl font-black tracking-tight text-ink">Find Local Workers</h1>
+            <p className="mt-1 text-sm text-muted">Discover verified professionals with transparent pricing and reviews</p>
+          </div>
+          <div className="flex w-full items-center gap-2 lg:w-auto">
+            <div className="flex flex-1 items-center gap-2 rounded-xl border border-line bg-white px-3 py-2.5 lg:w-[420px]">
+              <Search size={18} className="text-muted" />
+              <input
+                className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+                placeholder="Search by service, skill, or keyword"
+                value={filters.q}
+                onChange={(e) => setFilters({ q: e.target.value })}
+              />
             </div>
-
-            <label className="block">
-              <span className="label">Keyword</span>
-              <div className="relative">
-                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-                <input className="input pl-9" placeholder="e.g. fridge repair" value={filters.q} onChange={(e) => setFilters({ q: e.target.value })} />
-              </div>
-            </label>
-
-            <label className="block">
-              <span className="label">Service category</span>
-              <Select value={filters.category} onChange={(e) => setFilters({ category: e.target.value })}>
-                <option value="">All categories</option>
-                {categories.map((c) => (
-                  <option key={c._id} value={c.name}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
-            </label>
-
-            <label className="block">
-              <span className="label">Skills</span>
-              <input className="input" placeholder="Comma separated, e.g. Leak Repair" value={filters.skills} onChange={(e) => setFilters({ skills: e.target.value })} />
-            </label>
-
-            <label className="block">
-              <span className="label">Location</span>
-              <div className="relative">
-                <MapPin size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-                <input className="input pl-9" placeholder={defaultLocation} value={filters.location} onChange={(e) => setFilters({ location: e.target.value })} />
-              </div>
-            </label>
-
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className="label">Min rating</span>
-                <Select value={filters.minRating} onChange={(e) => setFilters({ minRating: e.target.value })}>
-                  <option value="">Any</option>
-                  {["4.5", "4.0", "3.5", "3.0"].map((r) => (
-                    <option key={r} value={r}>
-                      {r}+
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <label className="block">
-                <span className="label">Experience</span>
-                <Select value={filters.minExperience} onChange={(e) => setFilters({ minExperience: e.target.value })}>
-                  <option value="">Any</option>
-                  {["1", "3", "5", "8"].map((y) => (
-                    <option key={y} value={y}>
-                      {y}+ yrs
-                    </option>
-                  ))}
-                </Select>
-              </label>
-            </div>
-
-            <label className="block">
-              <span className="label">Sort by</span>
-              <Select value={filters.sort} onChange={(e) => setFilters({ sort: e.target.value })}>
-                <option value="relevance">Best match</option>
-                <option value="rating">Highest rating</option>
-                <option value="experience">Most experienced</option>
-                <option value="reviews">Most reviews</option>
-              </Select>
-            </label>
-
-            <Button className="w-full lg:hidden" onClick={() => setMobileFilters(false)}>
-              Show results
+            <Button variant="secondary" className="lg:hidden" onClick={() => setMobileFilters((v) => !v)}>
+              <SlidersHorizontal size={16} /> Filters
+              {hasActiveFilters && <Badge tone="brand">•</Badge>}
             </Button>
           </div>
-        </aside>
+        </div>
+      </div>
 
-        {/* Results */}
-        <section>
-          {loading ? (
-            <WorkerGridSkeleton count={6} />
-          ) : error ? (
-            <ErrorState message={error} onRetry={() => void load()} />
-          ) : result && result.total === 0 ? (
-            <EmptyState
-              title="No approved workers match your search yet"
-              message={hasActiveFilters ? "Try broadening your service area or removing a filter." : "Check back soon — new workers join KAMLE AI every week."}
-              action={
-                hasActiveFilters ? (
-                  <Button variant="secondary" onClick={clearAll}>
-                    <X size={16} /> Clear filters
-                  </Button>
-                ) : undefined
-              }
-            />
-          ) : (
-            <>
-              <div className="mb-4 flex items-center justify-between text-sm text-muted">
-                <span>
-                  {result && <strong className="text-ink">{result.total}</strong>} approved worker{result && result.total !== 1 ? "s" : ""} found
-                  {filters.location && (
-                    <>
-                      {" "}serving <strong className="text-ink">{filters.location}</strong>
-                    </>
-                  )}
-                </span>
-                <span className="hidden sm:inline">{result && result.page} of {result && result.totalPages}</span>
-              </div>
-
-              <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                {result?.items.map((w: PublicWorker) => <WorkerCard key={w.workerId} worker={w} />)}
-              </div>
-
-              {result && result.totalPages > 1 && (
-                <div className="mt-8 flex items-center justify-center gap-3">
-                  <Button variant="secondary" disabled={filters.page <= 1} onClick={() => setFilters({ page: filters.page - 1 })}>
-                    Previous
-                  </Button>
-                  <span className="text-sm text-muted">Page {filters.page} of {result.totalPages}</span>
-                  <Button variant="secondary" disabled={!result.hasNext} onClick={() => setFilters({ page: filters.page + 1 })}>
-                    Next
-                  </Button>
+      <div className="container-x py-6">
+        <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
+          <aside className={`${mobileFilters ? "block" : "hidden"} lg:block`}>
+            <div className="sticky top-20 overflow-hidden rounded-2xl border border-line bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-line px-5 py-4">
+                <div className="flex items-center gap-2 text-sm font-bold">
+                  <Filter size={16} /> Filters
                 </div>
-              )}
-            </>
-          )}
-        </section>
+                {hasActiveFilters && (
+                  <button onClick={clearAll} className="text-xs font-semibold text-brand-700 hover:underline">
+                    Reset
+                  </button>
+                )}
+              </div>
+              <div className="space-y-4 p-5">
+                <label className="block">
+                  <span className="label">Category</span>
+                  <Select value={filters.category} onChange={(e) => setFilters({ category: e.target.value })}>
+                    <option value="">All Categories</option>
+                    {categories.map((c) => (
+                      <option key={c._id} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="block">
+                  <span className="label">Skills</span>
+                  <input className="input" placeholder="e.g. plumbing, wiring" value={filters.skills} onChange={(e) => setFilters({ skills: e.target.value })} />
+                </label>
+                <label className="block">
+                  <span className="label">Location</span>
+                  <div className="relative">
+                    <MapPin size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                    <input className="input pl-9" placeholder={defaultLocation || "City/Area"} value={filters.location} onChange={(e) => setFilters({ location: e.target.value })} />
+                  </div>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className="label">Min Rating</span>
+                    <Select value={filters.minRating} onChange={(e) => setFilters({ minRating: e.target.value })}>
+                      <option value="">Any</option>
+                      <option value="4.5">4.5+</option>
+                      <option value="4.0">4.0+</option>
+                      <option value="3.5">3.5+</option>
+                      <option value="3.0">3.0+</option>
+                    </Select>
+                  </label>
+                  <label className="block">
+                    <span className="label">Experience</span>
+                    <Select value={filters.minExperience} onChange={(e) => setFilters({ minExperience: e.target.value })}>
+                      <option value="">Any</option>
+                      <option value="1">1+ yrs</option>
+                      <option value="3">3+ yrs</option>
+                      <option value="5">5+ yrs</option>
+                      <option value="8">8+ yrs</option>
+                    </Select>
+                  </label>
+                </div>
+                <label className="block">
+                  <span className="label">Sort By</span>
+                  <Select value={filters.sort} onChange={(e) => setFilters({ sort: e.target.value })}>
+                    <option value="relevance">Best Match</option>
+                    <option value="rating">Highest Rating</option>
+                    <option value="experience">Most Experienced</option>
+                    <option value="reviews">Most Reviews</option>
+                  </Select>
+                </label>
+                <Button className="w-full lg:hidden" onClick={() => setMobileFilters(false)}>
+                  View Results
+                </Button>
+              </div>
+            </div>
+          </aside>
+
+          <section>
+            <div className="mb-4 flex items-center justify-between rounded-xl border border-line bg-white px-4 py-2.5 text-sm">
+              <span className="text-muted">
+                <span className="font-semibold text-ink">{result?.total ?? 0}</span> verified workers
+              </span>
+              <span className="text-muted">
+                Page {result?.page ?? 1} of {result?.totalPages ?? 1}
+              </span>
+            </div>
+
+            {loading ? (
+              <WorkerGridSkeleton count={6} />
+            ) : error ? (
+              <ErrorState message={error} onRetry={() => void load()} />
+            ) : result && result.total === 0 ? (
+              <EmptyState
+                title="No workers found"
+                message={hasActiveFilters ? "Try changing your filters to see more results." : "New professionals are added regularly."}
+                action={
+                  hasActiveFilters ? (
+                    <Button variant="secondary" onClick={clearAll}>
+                      <X size={16} /> Clear Filters
+                    </Button>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {result?.items.map((w: PublicWorker) => <WorkerCard key={w.workerId} worker={w} />)}
+                </div>
+                {result && result.totalPages > 1 && (
+                  <div className="mt-8 flex items-center justify-center gap-2">
+                    <Button variant="secondary" size="sm" disabled={filters.page <= 1} onClick={() => setFilters({ page: filters.page - 1 })}>
+                      Previous
+                    </Button>
+                    <Button variant="secondary" size="sm" disabled={!result.hasNext} onClick={() => setFilters({ page: filters.page + 1 })}>
+                      Next
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );

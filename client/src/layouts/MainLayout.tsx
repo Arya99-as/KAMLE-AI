@@ -4,8 +4,13 @@ import { Footer } from "../components/layout/Footer";
 import { BottomNav } from "../components/layout/BottomNav";
 import { FloatingChatButton } from "../features/chat/FloatingChatButton";
 import { ChatPanel } from "../features/chat/ChatPanel";
+import { useAuth } from "../context/AuthContext";
 
 export function MainLayout() {
+  const { user } = useAuth();
+  // KAMLE AI chat is a customer-only feature.
+  const showKamleAi = user?.role === "customer";
+
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
@@ -14,8 +19,8 @@ export function MainLayout() {
       </main>
       <Footer />
       <BottomNav />
-      <FloatingChatButton />
-      <ChatPanel />
+      {showKamleAi && <FloatingChatButton />}
+      {showKamleAi && <ChatPanel />}
     </div>
   );
 }

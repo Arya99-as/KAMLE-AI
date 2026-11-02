@@ -1,14 +1,20 @@
 import {
   AlertTriangle,
+  Briefcase,
+  CalendarClock,
   Check,
   CreditCard,
+  Heart,
+  MessageSquareText,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   Star,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { useChat } from "../../features/chat/ChatContext";
 import {
   confirmEnquiryCompletion,
   createPaymentOrder,
@@ -26,6 +32,7 @@ import { Badge, Button, Field, Modal, Select, Spinner, StatusBadge, Tabs, Textar
 import { EmptyState } from "../../components/ui/states";
 import { WorkerCard } from "../../components/worker/WorkerCard";
 import type { PublicWorker } from "../../types";
+import { Logo } from "../../components/brand/Logo";
 
 type FavItem = { favoriteId: string; worker: PublicWorker };
 
@@ -51,6 +58,7 @@ function loadRazorpayScript(): Promise<boolean> {
 
 export default function CustomerDashboard() {
   const { user } = useAuth();
+  const { openChat } = useChat();
 
   const [tab, setTab] = useState("Requests");
   const [loading, setLoading] = useState(true);
@@ -62,7 +70,6 @@ export default function CustomerDashboard() {
   const [favorites, setFavorites] = useState<FavItem[]>([]);
   const [myReviews, setMyReviews] = useState<Review[]>([]);
 
-  // Modals
   const [payModalEnquiry, setPayModalEnquiry] = useState<Enquiry | null>(null);
   const [payAmount, setPayAmount] = useState<number>(500);
   const [paymentMethod, setPaymentMethod] = useState("upi");
@@ -253,31 +260,272 @@ export default function CustomerDashboard() {
     }
   }
 
+  const active = enquiries.filter((e) => {
+    const st = String(e.status).toUpperCase();
+    return st !== "CANCELLED" && st !== "REJECTED";
+  });
+  const pending = enquiries.filter((e) => ["PENDING", "SENT"].includes(String(e.status).toUpperCase()));
+  const completed = enquiries.filter((e) => String(e.status).toUpperCase() === "COMPLETED");
+  const unpaid = completed.filter((e) => e.paymentStatus !== "PAID");
+
   return (
-    <div className="container-x py-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-ink">Client Dashboard</h1>
-          <p className="text-sm text-muted">Manage your service requests, payments, and reviews</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button variant="secondary" size="sm" onClick={() => load(true)} disabled={refreshing}>
-            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} /> Refresh
-          </Button>
-                    <Link to="/discover">
-            <Button variant="primary" size="sm">
-              Find Workers
+    <div className="min-h-screen bg-slate-50/60">
+      <div className="border-b border-line bg-white">
+        <div className="container-x flex flex-col gap-4 py-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <Logo size="sm" />
+            <div>
+              <h1 className="text-2xl font-black tracking-tight text-ink">My Service Hub</h1>
+              <p className="mt-1 text-sm text-muted">Track requests, payments, reviews, and saved professionals in one place</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => load(true)} disabled={refreshing}>
+              <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} /> Refresh
             </Button>
-          </Link>
+            {user?.role === "customer" && (
+              <Button variant="ai" size="sm" onClick={openChat}>
+                <Sparkles size={14} /> Ask Kamle AI
+              </Button>
+            )}
+            <Link to="/discover">
+              <Button variant="primary" size="sm">
+                <Briefcase size={14} /> Find Workers
+              </Button>
+            </Link>
+          </div>
         </div>
       </div>
 
-      <div className="mt-6">
-        <Tabs
-          tabs={["Requests", "Payments", "Reviews", "Favorites"]}
-          active={tab}
-          onChange={setTab}
-        />
+      <div className="container-x py-6">
+        {user?.role === "customer" && (
+          <div className="mb-6 overflow-hidden rounded-2xl border border-ai/30 bg-gradient-to-r from-ai-light/80 via-white to-white shadow-sm">
+            <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-ai text-white shadow-sm">
+                  <Sparkles size={18} />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-ink">Kamle AI Assistant</h2>
+                  <p className="mt-1 text-sm text-muted">Describe your problem in plain language and get tailored worker recommendations instantly.</p>
+                </div>
+              </div>
+              <Button variant="ai" onClick={openChat}>
+                <MessageSquareText size={16} /> Open Assistant
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Active Requests</span>
+              <CalendarClock size={16} className="text-brand-600" />
+            </div>
+            <p className="mt-2 text-2xl font-black text-ink">{active.length}</p>
+            <p className="mt-1 text-xs text-muted">{pending.length} awaiting response</p>
+          </div>
+          <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Completed</span>
+              <Check size={16} className="text-emerald-600" />
+            </div>
+            <p className="mt-2 text-2xl font-black text-ink">{completed.length}</p>
+            <p className="mt-1 text-xs text-muted">{unpaid.length} need payment</p>
+          </div>
+          <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Payments</span>
+              <CreditCard size={16} className="text-blue-600" />
+            </div>
+            <p className="mt-2 text-2xl font-black text-ink">{payments.length}</p>
+            <p className="mt-1 text-xs text-muted">Receipts on record</p>
+          </div>
+          <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Saved Workers</span>
+              <Heart size={16} className="text-rose-600" />
+            </div>
+            <p className="mt-2 text-2xl font-black text-ink">{favorites.length}</p>
+            <p className="mt-1 text-xs text-muted">Ready to re-engage</p>
+          </div>
+        </div>
+
+        <div className="mt-6 overflow-hidden rounded-2xl border border-line bg-white shadow-sm">
+          <div className="border-b border-line px-5 py-4">
+            <Tabs tabs={["Requests", "Payments", "Reviews", "Favorites"]} active={tab} onChange={setTab} />
+          </div>
+          <div className="p-5">
+            {loading ? (
+              <div className="py-16 text-center">
+                <Spinner />
+              </div>
+            ) : loadError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700">{loadError}</div>
+            ) : (
+              <>
+                {tab === "Requests" && (
+                  <div>
+                    {enquiries.length === 0 ? (
+                      <EmptyState
+                        title="No service requests yet"
+                        message="Start by finding a professional for your task. Your requests will appear here with live status updates."
+                        action={
+                          <Link to="/discover">
+                            <Button variant="primary">Find a Worker</Button>
+                          </Link>
+                        }
+                      />
+                    ) : (
+                      <div className="space-y-3">
+                        {enquiries.map((e) => {
+                          const st = String(e.status).toUpperCase();
+                          const isCompleted = st === "COMPLETED";
+                          const isPaid = e.paymentStatus === "PAID";
+                          const isDisputed = st === "DISPUTED";
+                          const isPending = st === "PENDING" || st === "SENT";
+                          const isAccepted = st === "ACCEPTED";
+
+                          return (
+                            <div key={e._id} className="rounded-xl border border-line p-4 transition hover:border-brand-200 hover:shadow-sm">
+                              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                <div className="space-y-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-semibold text-ink">{actorName(e, meId)}</span>
+                                    <Badge tone="brand">{e.serviceCategory}</Badge>
+                                    <StatusBadge status={e.status} />
+                                    {isPaid && (
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+                                        <Check size={12} /> Paid
+                                      </span>
+                                    )}
+                                    {isCompleted && e.clientConfirmedAt && (
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                                        <Check size={12} /> Completion Confirmed
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-ink">{e.problemDescription}</p>
+                                  {e.location && <p className="text-xs text-muted">Location: {e.location}</p>}
+                                  {e.serviceAmount ? <p className="text-xs font-semibold text-brand-700">Service Fee: ₹{e.serviceAmount}</p> : null}
+                                  {isDisputed && e.disputeReason && (
+                                    <div className="rounded-lg bg-amber-50 p-2.5 text-xs text-amber-800">
+                                      <strong>Dispute:</strong> {e.disputeReason}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 lg:flex-col lg:items-end">
+                                  {isCompleted && !isPaid && (
+                                    <Button variant="primary" size="sm" onClick={() => handleInitiatePayment(e)}>
+                                      <CreditCard size={14} /> Pay ₹{e.serviceAmount || 0}
+                                    </Button>
+                                  )}
+                                  {isCompleted && !e.clientConfirmedAt && !isDisputed && (
+                                    <Button variant="secondary" size="sm" onClick={() => handleConfirmCompletion(e)}>
+                                      <Check size={14} /> Confirm Completion
+                                    </Button>
+                                  )}
+                                  {isCompleted && (
+                                    <Button variant="secondary" size="sm" onClick={() => setReviewModalEnquiry(e)}>
+                                      <Star size={14} className="text-amber-500" /> Rate & Review
+                                    </Button>
+                                  )}
+                                  {isCompleted && !isDisputed && (
+                                    <Button variant="ghost" size="sm" onClick={() => setDisputeModalEnquiry(e)}>
+                                      <AlertTriangle size={13} /> Report Problem
+                                    </Button>
+                                  )}
+                                  {(isPending || isAccepted) && (
+                                    <Button variant="secondary" size="sm" onClick={() => handleCancelRequest(e._id)} className="text-red-600 hover:bg-red-50">
+                                      <X size={14} /> Cancel Request
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {tab === "Payments" && (
+                  <div>
+                    {payments.length === 0 ? (
+                      <EmptyState title="No payment history" message="Your receipts will appear here once payments are completed." />
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-line text-left">
+                              <th className="pb-2 pr-4 font-semibold text-muted">Amount</th>
+                              <th className="pb-2 pr-4 font-semibold text-muted">Status</th>
+                              <th className="pb-2 pr-4 font-semibold text-muted">Method</th>
+                              <th className="pb-2 pr-4 font-semibold text-muted">Reference</th>
+                              <th className="pb-2 font-semibold text-muted">Date</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {payments.map((p) => (
+                              <tr key={p._id} className="border-b border-line/60">
+                                <td className="py-3 pr-4 font-semibold text-ink">₹{p.amount}</td>
+                                <td className="py-3 pr-4">
+                                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">{p.status}</span>
+                                </td>
+                                <td className="py-3 pr-4 text-muted">{p.paymentMethod?.toUpperCase()}</td>
+                                <td className="py-3 pr-4 font-mono text-xs text-muted">{p.transactionRef}</td>
+                                <td className="py-3 text-muted">{new Date(p.createdAt).toLocaleString()}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {tab === "Reviews" && (
+                  <div>
+                    {myReviews.length === 0 ? (
+                      <EmptyState title="No reviews yet" message="After completing a job, leave feedback to help others." />
+                    ) : (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {myReviews.map((r, i) => (
+                          <div key={r._id || i} className="rounded-xl border border-line p-4">
+                            <div className="flex items-center gap-1 text-amber-500">
+                              {Array.from({ length: 5 }).map((_, idx) => (
+                                <Star key={idx} size={16} fill={idx < r.rating ? "currentColor" : "none"} />
+                              ))}
+                              <span className="ml-2 text-xs font-semibold text-ink">{r.rating}.0</span>
+                            </div>
+                            <p className="mt-2 text-sm text-ink">{r.comment || "(No comment provided)"}</p>
+                            <p className="mt-2 text-xs text-muted">{new Date(r.createdAt).toLocaleDateString()}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {tab === "Favorites" && (
+                  <div>
+                    {favorites.length === 0 ? (
+                      <EmptyState title="No saved workers" message="Save professionals from Discover to build your shortlist." />
+                    ) : (
+                      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                        {favorites.map((f) => (
+                          <WorkerCard key={f.favoriteId} worker={f.worker} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
       {loading ? (

@@ -1,24 +1,50 @@
-import { cn } from "../../lib/utils";
+﻿import { cn } from "../../lib/utils";
 
-export function LogoMark({ size = 32, className }: { size?: number; className?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" className={className} aria-hidden>
-      <rect width="32" height="32" rx="8" fill="#2563EB" />
-      <path d="M10 22V10l12 12V10" stroke="white" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+interface LogoProps {
+  size?: "xs" | "sm" | "md" | "lg" | "xl";
+  showTagline?: boolean;
+  className?: string;
+  imageClassName?: string;
 }
 
-export function Logo({ compact = false, className }: { compact?: boolean; className?: string }) {
+const sizeMap = {
+  xs: "h-7",
+  sm: "h-8",
+  md: "h-10",
+  lg: "h-12",
+  xl: "h-14",
+};
+
+export function Logo({ size = "md", showTagline = false, className, imageClassName }: LogoProps) {
   return (
-    <span className={cn("inline-flex items-center gap-2.5", className)}>
-      <LogoMark size={30} />
-      {!compact && (
-        <span className="flex items-baseline gap-1.5">
-          <span className="text-xl font-extrabold tracking-tight">KAMLE</span>
-          <span className="rounded-md bg-ai px-1.5 py-0.5 text-xs font-bold text-white">AI</span>
-        </span>
+    <div className={cn("flex flex-col items-start", className)}>
+      <img
+        src="/assets/kamle-ai-logo.png"
+        alt="KAMLE AI - Describe Your Problem. Discover the Right Local Worker."
+        className={cn("w-auto object-contain", sizeMap[size], imageClassName)}
+        loading="eager"
+        decoding="async"
+      />
+      {showTagline && (
+        <p className="mt-1 text-[10px] text-muted sm:text-xs">
+          Describe Your Problem. Discover the Right Local Worker.
+        </p>
       )}
-    </span>
+    </div>
   );
 }
+
+export function LogoMark({ size = 40, className }: { size?: number; className?: string }) {
+  return (
+    <img
+      src="/assets/kamle-ai-logo.png"
+      alt="KAMLE AI"
+      className={cn("object-contain", className)}
+      style={{ height: size, width: "auto" }}
+      loading="eager"
+      decoding="async"
+    />
+  );
+}
+
+export default Logo;

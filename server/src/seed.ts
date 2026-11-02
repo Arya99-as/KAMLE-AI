@@ -186,8 +186,7 @@ const WORKERS: SeedWorker[] = [
   },
 ];
 
-async function run() {
-  await connectDB();
+export async function seedDatabase(disconnect = false) {
   logger.info("Seeding KAMLE AI database...");
 
   await Promise.all([
@@ -276,11 +275,19 @@ async function run() {
   logger.info("  customer@example.com / 9811111111");
   logger.info("  ramesh@example.com / 9800000001 (worker)");
 
-  await disconnectDB();
+  if (disconnect) {
+    await disconnectDB();
+  }
 }
 
-run().catch(async (err) => {
-  logger.error("Seed failed", err);
-  await disconnectDB();
-  process.exit(1);
-});
+// If executed directly from CLI (e.g. `npm run seed`)
+const isDirectRun = process.argv[1] && process.argv[1].replace(/\\/g, "/").endsWith("seed.ts");
+if (isDirectRun) {
+  connectDB()
+    .then(() => seedDatabase(true))
+    .catch(async (err) => {
+      logger.error("Seed failed", err);
+      await disconnectDB();
+      process.exit(1);
+    });
+}
