@@ -274,6 +274,110 @@ export function getCommissionRate() {
   return api<{ success: boolean; commissionPercent: number }>("/payments/commission-rate");
 }
 
+/* --------------------------- payment requests ---------------------------- */
+
+export interface PaymentRequest {
+  _id: string;
+  enquiryId: {
+    _id: string;
+    serviceCategory?: string;
+    problemDescription?: string;
+    location?: string;
+    status?: string;
+  } | string;
+  quotationId: {
+    _id: string;
+    total?: number;
+    approvedAmount?: number;
+    items?: Array<{ description: string; amount: number }>;
+  } | string;
+  workerId: {
+    _id: string;
+    name: string;
+    phone?: string;
+    email?: string;
+  } | string;
+  customerId: {
+    _id: string;
+    name: string;
+    phone?: string;
+    email?: string;
+  } | string;
+  agreedAmount: number;
+  commissionPercent: number;
+  commissionAmount: number;
+  workerPayableAmount: number;
+  currency: string;
+  completionNotes: string;
+  completionEvidence?: string[];
+  status: "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "REVISION_REQUESTED" | "CUSTOMER_PAYMENT_REQUESTED";
+  customerPaymentStatus: "NOT_INITIATED" | "PENDING" | "PROCESSING" | "PAID" | "FAILED" | "REFUND_PENDING" | "REFUNDED" | "DISPUTED";
+  payoutStatus: "NOT_ELIGIBLE" | "ELIGIBLE" | "PENDING_ADMIN_APPROVAL" | "APPROVED" | "PROCESSING" | "PAID" | "FAILED" | "REVERSED";
+  paymentId?: {
+    _id: string;
+    providerPaymentId?: string;
+    providerOrderId?: string;
+    status?: string;
+  } | string;
+  payoutId?: {
+    _id: string;
+    status?: string;
+    providerPayoutRef?: string;
+  } | string;
+  adminRemarks?: string;
+  providerPayoutRef?: string;
+  history?: Array<{
+    status: string;
+    customerPaymentStatus?: string;
+    payoutStatus?: string;
+    actorRole: string;
+    actorId?: string;
+    remarks?: string;
+    timestamp: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function createPaymentRequest(body: { enquiryId: string; completionNotes: string; completionEvidence?: string[] }) {
+  return api<{ success: boolean; paymentRequest: PaymentRequest }>("/payment-requests", {
+    method: "POST",
+    body,
+  });
+}
+
+export function getMyWorkerPaymentRequests(status?: string, page?: number) {
+  const query = qs({ status, page } as unknown as Record<string, string | number | boolean | undefined>);
+  return api<Paginated<PaymentRequest>>(`/payment-requests/my${query}`);
+}
+
+export function getCustomerPendingPaymentRequests() {
+  return api<{ success: boolean; requests: PaymentRequest[] }>("/payment-requests/customer-pending");
+}
+
+export function getPaymentRequestForEnquiry(enquiryId: string) {
+  return api<{ success: boolean; paymentRequest: PaymentRequest | null }>(`/payment-requests/for-enquiry/${enquiryId}`);
+}
+
+export function getAdminPaymentRequests(status?: string, page?: number) {
+  const query = qs({ status, page } as unknown as Record<string, string | number | boolean | undefined>);
+  return api<Paginated<PaymentRequest>>(`/payment-requests/admin${query}`);
+}
+
+export function adminDecidePaymentRequest(id: string, action: "approve" | "reject" | "request_evidence" | "send_to_customer", remarks?: string) {
+  return api<{ success: boolean; paymentRequest: PaymentRequest }>(`/payment-requests/admin/${id}/decision`, {
+    method: "POST",
+    body: { action, remarks },
+  });
+}
+
+export function adminAuthorizeWorkerPayout(payoutId: string, providerPayoutRef?: string, note?: string) {
+  return api<{ success: boolean; payout: Payout; paymentRequest: PaymentRequest }>(`/payment-requests/admin/authorize-payout`, {
+    method: "POST",
+    body: { payoutId, providerPayoutRef, note },
+  });
+}
+
 /* ------------------------------ quotations ------------------------------- */
 
 export interface QuotationPayload {

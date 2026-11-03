@@ -8,6 +8,7 @@ import PlatformConfig from "../models/PlatformConfig.js";
 import WebhookEvent from "../models/WebhookEvent.js";
 import { getPayableQuotation } from "./quotationService.js";
 import { notifyUser } from "./whatsappService.js";
+import { syncPaymentRequestOnSettlement, getCommissionForCategory } from "./paymentRequestService.js";
 import ApiError from "../utils/ApiError.js";
 import logger from "../utils/logger.js";
 import env from "../config/env.js";
@@ -142,7 +143,7 @@ export async function createPaymentOrder(params: CreateOrderParams) {
     throw ApiError.conflict("A completed payment already exists for this request");
   }
 
-  const commissionPercent = await getPlatformCommissionPercent();
+  const { commissionPercent } = await getCommissionForCategory(enquiry.serviceCategory);
   const commissionAmount = Math.round((amount * commissionPercent) / 100);
   const workerPayableAmount = amount - commissionAmount;
 
@@ -258,6 +259,19 @@ async function settlePayment(
       },
       { upsert: true, new: true, session: session ?? undefined },
     ).exec();
+
+    // Synchronize the PaymentRequest lifecycle
+    await syncPaymentRequestOnSettlement({
+      enquiryId: completedPayment.enquiryId,
+      paymentId: completedPayment._id,
+      amount: completedPayment.amount,
+      commissionPercent: completedPayment.commissionPercent,
+      commissionAmount: completedPayment.commissionAmount,
+      workerPayableAmount: completedPayment.workerPayableAmount,
+      payoutId: payout?._id,
+    }).catch((err) => {
+      logger.warn(`Failed to sync payment request on settlement: ${err}`);
+    });
 
     notifyUser(
       String(completedPayment.customerId),

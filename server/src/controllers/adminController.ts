@@ -503,7 +503,7 @@ export async function getPlatformConfig(_req: Request, res: Response) {
 }
 
 export async function updatePlatformConfig(req: Request, res: Response) {
-  const { commissionPercent, payoutTerms } = req.body;
+  const { commissionPercent, payoutTerms, categoryCommissions, calculationMethod, gatewayFeeBorneBy, effectiveDate } = req.body;
 
   let config = await PlatformConfig.findOne({ key: "global" });
   if (!config) {
@@ -518,6 +518,24 @@ export async function updatePlatformConfig(req: Request, res: Response) {
     config.commissionPercent = num;
   }
 
+  if (Array.isArray(categoryCommissions)) {
+    config.categoryCommissions = categoryCommissions.filter(
+      (c) => c && typeof c.categoryName === "string" && typeof c.commissionPercent === "number",
+    );
+  }
+
+  if (calculationMethod && ["percentage", "fixed_plus_percentage"].includes(calculationMethod)) {
+    config.calculationMethod = calculationMethod;
+  }
+
+  if (gatewayFeeBorneBy && ["platform", "customer", "worker"].includes(gatewayFeeBorneBy)) {
+    config.gatewayFeeBorneBy = gatewayFeeBorneBy;
+  }
+
+  if (effectiveDate) {
+    config.effectiveDate = new Date(effectiveDate);
+  }
+
   if (payoutTerms) config.payoutTerms = payoutTerms;
   config.updatedBy = new mongoose.Types.ObjectId(req.user!.id);
   await config.save();
@@ -527,7 +545,12 @@ export async function updatePlatformConfig(req: Request, res: Response) {
     action: "platform.config.update",
     targetType: "PlatformConfig",
     targetId: String(config._id),
-    metadata: { commissionPercent: config.commissionPercent, payoutTerms: config.payoutTerms },
+    metadata: {
+      commissionPercent: config.commissionPercent,
+      categoryCommissions: config.categoryCommissions,
+      calculationMethod: config.calculationMethod,
+      gatewayFeeBorneBy: config.gatewayFeeBorneBy,
+    },
   });
 
   res.json({ success: true, config, message: "Platform configuration updated" });

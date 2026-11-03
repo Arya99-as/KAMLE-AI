@@ -16,6 +16,7 @@ import {
   Menu,
   RefreshCw,
   Search,
+  ShieldCheck,
   Star,
   User,
 } from "lucide-react";
@@ -35,6 +36,7 @@ import { Badge, Button, Field, Input, Modal, Spinner, StatusBadge } from "../../
 import { EmptyState } from "../../components/ui/states";
 import { StatCard } from "../../components/dashboard/StatCard";
 import WorkerQuotations from "../../components/dashboard/WorkerQuotations";
+import WorkerPaymentRequests from "../../components/dashboard/WorkerPaymentRequests";
 
 function otherParty(e: Enquiry, meId: string) {
   const ref = String(e.customerId) === meId ? e.workerId : e.customerId;
@@ -47,7 +49,7 @@ export default function WorkerDashboard() {
 
   // Navigation State
   const [navSection, setNavSection] = useState<
-    "overview" | "new_requests" | "active_jobs" | "completed_jobs" | "quotations" | "earnings" | "reviews" | "profile" | "settings"
+    "overview" | "new_requests" | "active_jobs" | "completed_jobs" | "payment_requests" | "quotations" | "earnings" | "reviews" | "profile" | "settings"
   >("overview");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -330,6 +332,18 @@ export default function WorkerDashboard() {
           >
             <CheckSquare size={18} className="shrink-0" />
             {!sidebarCollapsed && <span>Completed Jobs</span>}
+          </button>
+
+          <button
+            onClick={() => setNavSection("payment_requests")}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition ${
+              navSection === "payment_requests"
+                ? "bg-blue-50 text-blue-700 font-extrabold shadow-sm"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            <ShieldCheck size={18} className="shrink-0 text-blue-600" />
+            {!sidebarCollapsed && <span>Payment Requests</span>}
           </button>
 
           <button
@@ -764,6 +778,16 @@ export default function WorkerDashboard() {
 
               {/* D. SERVICE PRICING / QUOTATIONS SECTION */}
               {navSection === "quotations" && <WorkerQuotations enquiries={received} />}
+
+              {/* PAYMENT REQUESTS SECTION */}
+              {navSection === "payment_requests" && (
+                <WorkerPaymentRequests
+                  activeJobs={received.filter((e) =>
+                    ["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(String(e.status).toUpperCase())
+                  )}
+                  onRefresh={load}
+                />
+              )}
 
               {/* D. EARNINGS & PAYOUTS SECTION */}
               {navSection === "earnings" && (

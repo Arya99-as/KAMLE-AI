@@ -12,17 +12,7 @@ export async function connectDB(): Promise<string> {
       throw new Error("USE_MEMORY_DB must be false in production");
     }
     const { MongoMemoryServer } = await import("mongodb-memory-server");
-    const fs = await import("node:fs");
-    const path = await import("node:path");
-    let instanceOptions: Record<string, unknown> = {};
-    if (fs.existsSync("D:\\")) {
-      const dbDir = path.join("D:\\kamle-mongo-temp", `db_${Date.now()}`);
-      if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
-      instanceOptions = { dbPath: dbDir };
-    }
-    const mem = await MongoMemoryServer.create({
-      instance: instanceOptions,
-    });
+    const mem = await MongoMemoryServer.create();
     memoryServer = mem;
     uri = mem.getUri();
     logger.info(`Using in-memory MongoDB instance: ${uri}`);

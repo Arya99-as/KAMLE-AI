@@ -210,6 +210,10 @@ export async function seedDatabase(disconnect = false) {
     name: "Aarav Sharma", phone: "9811111111", email: "customer@example.com",
     passwordHash, role: "customer", accountStatus: "active", location: "Kolhapur",
   });
+  const user8623 = await User.create({
+    name: "User 8623", phone: "8623970107", email: "8623970107@kamle.ai",
+    passwordHash, role: "customer", accountStatus: "active", location: "Kolhapur",
+  });
   const customer2 = await User.create({
     name: "Priya Nair", phone: "9822222222", email: "priya@example.com",
     passwordHash, role: "customer", accountStatus: "active", location: "Pune",

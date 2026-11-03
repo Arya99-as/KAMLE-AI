@@ -11,6 +11,9 @@ export interface IPlatformConfig extends Document<Types.ObjectId> {
   categoryCommissions: ICategoryCommission[];
   routeEnabled: boolean;
   payoutTerms: string;
+  effectiveDate: Date;
+  calculationMethod: "percentage" | "fixed_plus_percentage";
+  gatewayFeeBorneBy: "platform" | "customer" | "worker";
   updatedBy?: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -31,6 +34,9 @@ const platformConfigSchema = new Schema<IPlatformConfig>(
     categoryCommissions: { type: [categoryCommissionSchema], default: [] },
     routeEnabled: { type: Boolean, default: false },
     payoutTerms: { type: String, default: "Standard net-7 payout schedule upon job verification." },
+    effectiveDate: { type: Date, default: Date.now },
+    calculationMethod: { type: String, enum: ["percentage", "fixed_plus_percentage"], default: "percentage" },
+    gatewayFeeBorneBy: { type: String, enum: ["platform", "customer", "worker"], default: "platform" },
     updatedBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true },

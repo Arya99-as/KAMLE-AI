@@ -9,6 +9,7 @@ import adminRoutes from "./adminRoutes.js";
 import paymentRoutes from "./paymentRoutes.js";
 import quotationRoutes from "./quotationRoutes.js";
 import whatsappRoutes from "./whatsappRoutes.js";
+import paymentRequestRoutes from "./paymentRequestRoutes.js";
 import { createReport } from "../controllers/reportController.js";
 import { authenticate } from "../middleware/auth.js";
 import { validateBody } from "../middleware/validate.js";
@@ -31,6 +32,7 @@ router.get("/health", asyncHandler(async (_req, res) => {
 router.use("/auth", authRoutes);
 router.use("/workers", workerRoutes);
 router.use("/payments", paymentRoutes);
+router.use("/payment-requests", paymentRequestRoutes);
 router.use("/quotations", quotationRoutes);
 router.use("/whatsapp", whatsappRoutes);
 router.use("/", searchRoutes);

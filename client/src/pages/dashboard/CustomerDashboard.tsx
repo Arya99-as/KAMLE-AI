@@ -44,6 +44,7 @@ import { Logo } from "../../components/brand/Logo";
 import { StatCard } from "../../components/dashboard/StatCard";
 import { ReceiptModal } from "../../components/dashboard/ReceiptModal";
 import CustomerQuotations from "../../components/dashboard/CustomerQuotations";
+import CustomerPendingPayments from "../../components/dashboard/CustomerPendingPayments";
 
 type FavItem = { favoriteId: string; worker: PublicWorker };
 
@@ -802,7 +803,10 @@ export default function CustomerDashboard() {
 
                 {/* 3. PAYMENTS TAB */}
                 {tab === "payments" && (
-                  <div>
+                  <div className="space-y-6">
+                    {/* Active Pending Payments From Admin */}
+                    <CustomerPendingPayments onPaymentSuccess={() => { load(); }} />
+
                     {payments.length === 0 ? (
                       <EmptyState
                         title="No payment history yet"

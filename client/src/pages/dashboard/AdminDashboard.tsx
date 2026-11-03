@@ -57,10 +57,12 @@ import { useAuth } from '../../context/AuthContext';
 import type { Enquiry, Payment, Payout } from '../../types';
 import { StatCard } from '../../components/dashboard/StatCard';
 import AdminQuotations from '../../components/dashboard/AdminQuotations';
+import AdminPaymentRequests from '../../components/dashboard/AdminPaymentRequests';
 
 type AdminNav =
   | 'overview'
   | 'quotations'
+  | 'payment_requests'
   | 'payments'
   | 'payouts'
   | 'users'
@@ -76,6 +78,7 @@ type AdminNav =
 const NAV_ITEMS: Array<{ key: AdminNav; label: string; icon: typeof LayoutDashboard }> = [
   { key: 'overview', label: 'Overview & KPIs', icon: LayoutDashboard },
   { key: 'quotations', label: 'Quotation & Payment Approval', icon: ClipboardCheck },
+  { key: 'payment_requests', label: 'Payment Requests', icon: FileCheck },
   { key: 'payments', label: 'Payments & Revenue', icon: CreditCard },
   { key: 'payouts', label: 'Worker Payouts', icon: Wallet },
   { key: 'verifications', label: 'Worker Applications', icon: FileCheck },
@@ -968,6 +971,9 @@ export default function AdminDashboard() {
           {/* TAB 2: PAYMENTS & REVENUE (Customer Payment Ledger) */}
           {/* TAB: QUOTATION & PAYMENT APPROVAL */}
           {activeNav === 'quotations' && <AdminQuotations />}
+
+          {/* TAB: PAYMENT REQUEST MANAGEMENT */}
+          {activeNav === 'payment_requests' && <AdminPaymentRequests />}
 
           {/* TAB 2: PAYMENTS & REVENUE */}
           {activeNav === 'payments' && (
