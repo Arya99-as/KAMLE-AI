@@ -32,11 +32,11 @@ export async function createReview(req: Request<unknown, unknown, ReviewInput>, 
     throw ApiError.forbidden("You can only review a worker after a completed service request");
   }
 
+  // One review per completed service request (not one per worker lifetime), so
+  // returning customers can review each new job while duplicates stay blocked.
   const existing = await Review.findOne({
-    $or: [
-      { customerId: req.user!.id, enquiryId: completed._id },
-      { customerId: req.user!.id, workerId },
-    ],
+    customerId: req.user!.id,
+    enquiryId: completed._id,
   });
   if (existing) {
     throw ApiError.conflict("You have already submitted a review for this service");

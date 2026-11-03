@@ -3,7 +3,10 @@ import mongoose, { type Connection } from "mongoose";
 import Payment, { type IPayment } from "../models/Payment.js";
 import Payout, { type IPayout } from "../models/Payout.js";
 import Enquiry from "../models/Enquiry.js";
+import Quotation from "../models/Quotation.js";
 import PlatformConfig from "../models/PlatformConfig.js";
+import WebhookEvent from "../models/WebhookEvent.js";
+import { getPayableQuotation } from "./quotationService.js";
 import ApiError from "../utils/ApiError.js";
 import logger from "../utils/logger.js";
 import env from "../config/env.js";
@@ -93,11 +96,35 @@ export async function createPaymentOrder(params: CreateOrderParams) {
     throw ApiError.badRequest("This service request has already been paid for");
   }
 
-  if (String(enquiry.status).toUpperCase() !== "COMPLETED") {
-    throw ApiError.badRequest("The worker must mark the work as completed before payment");
+  // New workflow: the worker proposes a price, an admin approves it, and the
+  // customer accepts it. Only then can the customer pay, and the amount is the
+  // server-approved quotation total — never a client-supplied figure.
+  // Legacy completed-job payments remain supported when no quotation exists.
+  const quotation = await getPayableQuotation(String(enquiry._id));
+  let amount: number;
+  if (quotation) {
+    if (quotation.customerStatus === "REJECTED") {
+      throw ApiError.badRequest(
+        "The customer rejected this quotation. The worker must submit a revised quote before payment.",
+      );
+    }
+    if (quotation.status !== "APPROVED") {
+      throw ApiError.badRequest("The quotation must be approved by an admin before payment");
+    }
+    if (quotation.customerStatus !== "ACCEPTED") {
+      throw ApiError.badRequest("Please accept the approved quotation before paying");
+    }
+    if (new Date(quotation.validUntil).getTime() <= Date.now()) {
+      throw ApiError.badRequest("The approved quotation has expired");
+    }
+    amount = Number(quotation.approvedAmount ?? quotation.total);
+  } else {
+    if (String(enquiry.status).toUpperCase() !== "COMPLETED") {
+      throw ApiError.badRequest("The worker must mark the work as completed before payment");
+    }
+    amount = Number(enquiry.serviceAmount ?? 0);
   }
 
-  const amount = Number(enquiry.serviceAmount ?? 0);
   if (!Number.isFinite(amount) || amount <= 0) {
     throw ApiError.badRequest("The service amount has not been set for this request");
   }
@@ -150,6 +177,8 @@ export async function createPaymentOrder(params: CreateOrderParams) {
   payment.provider = provider;
   payment.providerOrderId = providerOrderId;
   payment.status = "PENDING";
+  payment.quotationId = quotation?._id;
+  payment.approvedAmount = quotation ? amount : undefined;
   await payment.save();
 
   return {
@@ -163,6 +192,8 @@ export async function createPaymentOrder(params: CreateOrderParams) {
     workerPayableAmount,
     keyId: provider === "razorpay" ? env.payments.keyId : undefined,
     workerId: String(enquiry.workerId),
+    quotationId: quotation ? String(quotation._id) : undefined,
+    approvedAmount: quotation ? amount : undefined,
   };
 }
 
@@ -196,6 +227,19 @@ async function settlePayment(
     }
 
     await Enquiry.updateOne({ _id: completedPayment.enquiryId }, { $set: { paymentStatus: "PAID" } }, { session: session ?? undefined });
+
+    // Link the settled payment back to its quotation so customers and admins can
+    // see the paid state on the quotation without duplicating money data.
+    const quotationRef = completedPayment.quotationId
+      ? completedPayment.quotationId
+      : (await Quotation.findOne({ enquiryId: completedPayment.enquiryId }).select("_id").lean().exec())?._id;
+    if (quotationRef) {
+      await Quotation.updateOne(
+        { _id: quotationRef },
+        { $set: { paidAt: new Date(), paymentId: completedPayment._id } },
+        { session: session ?? undefined },
+      );
+    }
 
     const payout = await Payout.findOneAndUpdate(
       { paymentId: completedPayment._id },
@@ -270,7 +314,7 @@ export async function verifyAndRecordPayment(params: VerifyPaymentParams) {
   return settlePayment(payment, providerPaymentId, paymentMethod ?? "simulated");
 }
 
-export async function handlePaymentWebhook(rawBody: Buffer, signature: string) {
+export async function handlePaymentWebhook(rawBody: Buffer, signature: string, eventIdFromHeader?: string) {
   if (env.payments.provider !== "razorpay") {
     throw ApiError.badRequest("Webhooks are only supported for the Razorpay provider");
   }
@@ -294,6 +338,57 @@ export async function handlePaymentWebhook(rawBody: Buffer, signature: string) {
     throw ApiError.badRequest("Invalid webhook payload");
   }
 
+  const eventType = event.event ?? "unknown";
+
+  // Idempotency: Razorpay retries the same event with the same
+  // `x-razorpay-event-id` header. Fall back to a deterministic body hash when
+  // the header is absent (e.g. some proxies strip it) so retries are still
+  // deduplicated instead of double-settling payments/payouts.
+  const eventId =
+    (eventIdFromHeader ?? "").trim() ||
+    "body_" + crypto.createHash("sha256").update(rawBody).digest("hex");
+
+  const existing = await WebhookEvent.findOne({ eventId }).lean().exec();
+  if (existing?.processed) {
+    logger.info(`Ignoring duplicate webhook event ${eventId} (${eventType})`);
+    return { received: true, duplicate: true, processed: true };
+  }
+  if (!existing) {
+    try {
+      await WebhookEvent.create({ eventId, eventType, provider: "razorpay", processed: false });
+    } catch (err) {
+      // Concurrent delivery of the same event: the first request owns processing.
+      if ((err as { code?: number }).code === 11000) {
+        logger.info(`Concurrent duplicate webhook event ${eventId} (${eventType})`);
+        return { received: true, duplicate: true, processed: true };
+      }
+      throw err;
+    }
+  } else {
+    await WebhookEvent.updateOne({ eventId }, { $set: { eventType, error: "" } }).exec();
+  }
+
+  try {
+    const result = await processWebhookEvent(event, eventType);
+    await WebhookEvent.updateOne(
+      { eventId },
+      { $set: { processed: true, processedAt: new Date(), error: "" } },
+    ).exec();
+    return { ...result, eventId };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Webhook processing failed";
+    logger.error(`Webhook event ${eventId} (${eventType}) failed: ${message}`);
+    // Leave processed=false and record the error so a provider retry can reprocess.
+    await WebhookEvent.updateOne({ eventId }, { $set: { error: message.slice(0, 500) } }).exec();
+    throw err;
+  }
+}
+
+async function processWebhookEvent(
+  event: { event?: string; payload?: { payment?: { entity?: Record<string, unknown> } } },
+  eventType: string,
+) {
+  void eventType;
   const entity = event.payload?.payment?.entity;
   if (!entity) {
     return { received: true, ignored: true };

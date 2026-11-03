@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useAuth } from "../../context/AuthContext";
 
 interface ChatContextValue {
   open: boolean;
@@ -10,7 +11,14 @@ interface ChatContextValue {
 const ChatContext = createContext<ChatContextValue | null>(null);
 
 export function ChatProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
+
+  // Close the panel whenever the signed-in account changes so a second
+  // customer can never see the previous customer's thread on screen.
+  useEffect(() => {
+    setOpen(false);
+  }, [user?.id]);
 
   const openChat = useCallback(() => setOpen(true), []);
   const closeChat = useCallback(() => setOpen(false), []);

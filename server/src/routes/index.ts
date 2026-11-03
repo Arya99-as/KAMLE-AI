@@ -7,6 +7,7 @@ import interactionRoutes from "./interactionRoutes.js";
 import commonRoutes from "./commonRoutes.js";
 import adminRoutes from "./adminRoutes.js";
 import paymentRoutes from "./paymentRoutes.js";
+import quotationRoutes from "./quotationRoutes.js";
 import { createReport } from "../controllers/reportController.js";
 import { authenticate } from "../middleware/auth.js";
 import { validateBody } from "../middleware/validate.js";
@@ -29,6 +30,7 @@ router.get("/health", asyncHandler(async (_req, res) => {
 router.use("/auth", authRoutes);
 router.use("/workers", workerRoutes);
 router.use("/payments", paymentRoutes);
+router.use("/quotations", quotationRoutes);
 router.use("/", searchRoutes);
 router.use("/", interactionRoutes);
 router.use("/", commonRoutes);

@@ -1,5 +1,9 @@
 import { api, qs } from "../lib/api";
 import type {
+  ChatConversation,
+  ChatConversationList,
+  ChatConversationStatus,
+  ChatConversationSummary,
   ChatResponse,
   Enquiry,
   Paginated,
@@ -11,6 +15,7 @@ import type {
   Payment,
   Payout,
   PlatformConfig,
+  Quotation,
 } from "../types";
 
 /* ------------------------------- auth ----------------------------------- */
@@ -96,8 +101,54 @@ export function submitWorkerProfile() {
 
 /* ----------------------------- chat (AI) -------------------------------- */
 
-export function sendChatMessage(body: { sessionKey?: string; message: string; category?: string; location?: string }) {
+export function sendChatMessage(body: {
+  conversationId?: string;
+  sessionKey?: string;
+  message: string;
+  category?: string;
+  location?: string;
+}) {
   return api<ChatResponse>("/chat/message", { method: "POST", body, auth: true });
+}
+
+export function listChatConversations(params?: {
+  status?: ChatConversationStatus;
+  page?: number;
+  limit?: number;
+}) {
+  return api<ChatConversationList>(`/chat/conversations${qs(params ?? {})}`, { auth: true });
+}
+
+export function createChatConversation(body: { title?: string } = {}) {
+  return api<{ conversation: ChatConversationSummary }>("/chat/conversations", {
+    method: "POST",
+    body,
+    auth: true,
+  });
+}
+
+export function getChatConversation(conversationId: string) {
+  return api<{ conversation: ChatConversation }>(
+    `/chat/conversations/${encodeURIComponent(conversationId)}`,
+    { auth: true },
+  );
+}
+
+export function updateChatConversation(
+  conversationId: string,
+  body: { title?: string; status?: ChatConversationStatus },
+) {
+  return api<{ conversation: ChatConversationSummary }>(
+    `/chat/conversations/${encodeURIComponent(conversationId)}`,
+    { method: "PATCH", body, auth: true },
+  );
+}
+
+export function deleteChatConversation(conversationId: string) {
+  return api<{ conversationId: string }>(
+    `/chat/conversations/${encodeURIComponent(conversationId)}`,
+    { method: "DELETE", auth: true },
+  );
 }
 
 /* -------------------------- interactions --------------------------------- */
@@ -164,6 +215,8 @@ export interface CreateOrderResult {
     workerPayableAmount: number;
     keyId?: string;
     workerId: string;
+    quotationId?: string;
+    approvedAmount?: number;
   };
 }
 
@@ -217,6 +270,45 @@ export function getCommissionRate() {
   return api<{ success: boolean; commissionPercent: number }>("/payments/commission-rate");
 }
 
+/* ------------------------------ quotations ------------------------------- */
+
+export interface QuotationPayload {
+  enquiryId?: string;
+  labourCharges: number;
+  materialCharges: number;
+  additionalCharges: Array<{ description: string; amount: number }>;
+  estimatedCompletionTime: string;
+  validUntil: string;
+  notes?: string;
+}
+
+export function getMyQuotations(status?: string) {
+  return api<Paginated<Quotation>>(`/quotations/my${qs({ status })}`);
+}
+
+export function getQuotationForEnquiry(enquiryId: string) {
+  return api<{ quotation: Quotation }>(`/quotations/for-enquiry/${enquiryId}`);
+}
+
+export function createQuotation(body: QuotationPayload) {
+  return api<{ quotation: Quotation }>("/quotations", { method: "POST", body });
+}
+
+export function updateQuotation(id: string, body: QuotationPayload) {
+  return api<{ quotation: Quotation }>(`/quotations/${id}`, { method: "PATCH", body });
+}
+
+export function submitQuotation(id: string) {
+  return api<{ quotation: Quotation }>(`/quotations/${id}/submit`, { method: "POST" });
+}
+
+export function respondToQuotation(id: string, response: "accept" | "reject", note?: string) {
+  return api<{ quotation: Quotation }>(`/quotations/${id}/respond`, {
+    method: "POST",
+    body: { response, note },
+  });
+}
+
 /* -------------------------------- admin ---------------------------------- */
 
 export function adminDashboard() {
@@ -258,6 +350,46 @@ export function adminResolveDispute(id: string, resolution: "COMPLETED" | "CANCE
 
 export function adminPayments(status?: string, page = 1) {
   return api<Paginated<Payment>>(`/admin/payments${qs({ status, page })}`);
+}
+
+export function adminQuotations(status?: string, page = 1) {
+  return api<Paginated<Quotation>>(`/admin/quotations${qs({ status, page })}`);
+}
+
+export function adminQuotationDecision(id: string, decision: "approve" | "reject" | "request_revision", remarks?: string) {
+  return api<{ success: boolean; quotation: Quotation; message: string }>(`/admin/quotations/${id}/decision`, {
+    method: "POST",
+    body: { decision, remarks },
+  });
+}
+
+export function adminQuotationRemarks(id: string, remarks: string) {
+  return api<{ success: boolean; quotation: Quotation }>(`/admin/quotations/${id}/remarks`, {
+    method: "PATCH",
+    body: { remarks },
+  });
+}
+
+export interface PaymentConsistencyCheck {
+  key: string;
+  ok: boolean;
+  detail: string;
+}
+
+export function adminPaymentDetail(id: string) {
+  return api<{
+    success: boolean;
+    payment: Payment;
+    payout: Payout | null;
+    checks: PaymentConsistencyCheck[];
+  }>(`/admin/payments/${id}`);
+}
+
+export function adminReconcilePayment(id: string, action: "sync" | "request_refund" | "mark_refunded", note?: string) {
+  return api<{ success: boolean; payment: Payment; message: string }>(`/admin/payments/${id}/reconcile`, {
+    method: "POST",
+    body: { action, note },
+  });
 }
 
 export function adminPayouts(status?: string, page = 1) {
@@ -314,6 +446,34 @@ export function createCategory(body: { name: string; description?: string; icon?
 
 export function updateCategory(id: string, body: Partial<ServiceCategory>) {
   return api<{ category: ServiceCategory }>(`/admin/categories/${id}`, { method: "PATCH", body });
+}
+
+export function adminAuditLogs(params: { action?: string; targetType?: string; page?: number } = {}) {
+  return api<Paginated<{ _id: string; adminId: { _id?: string; name?: string; email?: string; role?: string } | string; action: string; targetType: string; targetId?: string; metadata?: Record<string, unknown>; createdAt: string }>>(
+    `/admin/audit-logs${qs(params as unknown as Record<string, string | number | boolean | undefined>)}`,
+  );
+}
+
+/**
+ * Downloads a private worker verification document as a Blob. The endpoint is
+ * admin-only and requires the bearer token, so a plain <a href> cannot be used.
+ */
+export async function fetchWorkerDocument(profileId: string, index: number): Promise<Blob> {
+  const token = localStorage.getItem("kamle_ai_token");
+  const res = await fetch(`/api/admin/workers/${profileId}/documents/${index}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    let message = `Could not open document (${res.status})`;
+    try {
+      const data = (await res.json()) as { error?: { message?: string } };
+      if (data.error?.message) message = data.error.message;
+    } catch {
+      // Non-JSON error body; keep the status message.
+    }
+    throw new Error(message);
+  }
+  return res.blob();
 }
 
 export function getMyWorkerProfile() {

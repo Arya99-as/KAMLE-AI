@@ -1,9 +1,17 @@
+import { randomUUID } from "node:crypto";
 import mongoose, { Schema, type Document, type Model, type Types } from "mongoose";
 import type { ChatMessage, ExtractedRequirements } from "../types/ai.js";
 
+export type ChatConversationStatus = "ACTIVE" | "ARCHIVED";
+
 export interface IChatSession extends Document<Types.ObjectId> {
+  /** Public, stable conversation identifier. Mirrors sessionKey for legacy rows. */
+  conversationId?: string;
   customerId?: Types.ObjectId;
+  /** Legacy identifier kept for backward compatibility with existing clients/records. */
   sessionKey: string;
+  title: string;
+  status: ChatConversationStatus;
   messages: ChatMessage[];
   extractedRequirements: ExtractedRequirements;
   createdAt: Date;
@@ -34,8 +42,11 @@ const requirementsSchema = new Schema<ExtractedRequirements>(
 
 const chatSessionSchema = new Schema<IChatSession>(
   {
+    conversationId: { type: String, index: true, unique: true, sparse: true },
     customerId: { type: Schema.Types.ObjectId, ref: "User", index: true },
     sessionKey: { type: String, required: true, unique: true, index: true },
+    title: { type: String, default: "New conversation", trim: true, maxlength: 120 },
+    status: { type: String, enum: ["ACTIVE", "ARCHIVED"], default: "ACTIVE", index: true },
     messages: { type: [messageSchema], default: [] },
     extractedRequirements: {
       type: requirementsSchema,
@@ -53,8 +64,21 @@ const chatSessionSchema = new Schema<IChatSession>(
   { timestamps: true },
 );
 
-// Data-retention helper: sessions are cheap to expire after 30 days of inactivity.
-chatSessionSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
+// Every persisted conversation must expose a stable conversationId. Legacy
+// documents (created before this field existed) inherit their sessionKey the
+// next time they are saved, so no record is lost or rewritten destructively.
+chatSessionSchema.pre("validate", function (next) {
+  if (!this.sessionKey) this.sessionKey = randomUUID();
+  if (!this.conversationId) this.conversationId = this.sessionKey;
+  next();
+});
+
+// Customer-scoped history listing (most recently updated first).
+chatSessionSchema.index({ customerId: 1, status: 1, updatedAt: -1 });
+
+// NOTE: the previous 30-day TTL index was removed deliberately. Conversations
+// are user-owned history and must survive logout, re-login and inactivity.
+// Retention is now an explicit product decision rather than silent deletion.
 
 export const ChatSession: Model<IChatSession> =
   (mongoose.models.ChatSession as Model<IChatSession>) ||

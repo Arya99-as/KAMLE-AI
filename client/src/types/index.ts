@@ -45,6 +45,16 @@ export interface WorkerProfile {
   ratingAverage: number;
   ratingCount: number;
   completedEnquiries: number;
+  payoutAccount?: {
+    accountHolderName?: string;
+    bankName?: string;
+    accountNumber?: string;
+    ifsc?: string;
+    upiId?: string;
+    status?: string;
+    isVerified?: boolean;
+    linkedAccountId?: string;
+  };
 }
 
 export interface PublicWorker {
@@ -131,19 +141,90 @@ export interface Payment {
   enquiryId: string | { _id: string; serviceCategory?: string; problemDescription?: string };
   customerId: string | UserRef;
   workerId: string | UserRef;
+  quotationId?: string | { _id: string; approvedAmount?: number; total?: number; status?: string };
+  approvedAmount?: number;
   amount: number;
   currency: string;
   commissionPercent: number;
   commissionAmount: number;
   workerPayableAmount: number;
-  status: "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
+  refundedAmount?: number;
+  refundStatus?: "NONE" | "PARTIAL" | "FULL";
+  status: "PENDING" | "COMPLETED" | "FAILED" | "REFUND_REQUESTED" | "REFUNDED";
   provider: string;
   transactionRef: string;
   providerOrderId?: string;
   providerPaymentId?: string;
   paymentMethod?: string;
   verifiedAt?: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
+}
+
+export type QuotationStatus =
+  | "DRAFT"
+  | "SUBMITTED"
+  | "UNDER_REVIEW"
+  | "APPROVED"
+  | "REJECTED"
+  | "REVISION_REQUESTED"
+  | "EXPIRED";
+
+export type QuotationCustomerStatus = "PENDING" | "ACCEPTED" | "REJECTED";
+
+export interface QuotationAdditionalCharge {
+  description: string;
+  amount: number;
+}
+
+export interface QuotationHistoryEvent {
+  status: QuotationStatus;
+  at: string;
+  by?: string | UserRef;
+  role: "worker" | "customer" | "admin" | "system";
+  note?: string;
+}
+
+export interface QuotationEnquiryRef {
+  _id: string;
+  serviceCategory: string;
+  problemDescription: string;
+  location?: string;
+  status?: EnquiryStatus;
+  paymentStatus?: "UNPAID" | "PAID" | "REFUNDED";
+  serviceAmount?: number;
+  clientConfirmedAt?: string;
+  statusHistory?: EnquiryStatusEvent[];
+  createdAt?: string;
+}
+
+export interface Quotation {
+  _id: string;
+  enquiryId: string | QuotationEnquiryRef;
+  customerId: string | UserRef;
+  workerId: string | UserRef;
+  status: QuotationStatus;
+  labourCharges: number;
+  materialCharges: number;
+  additionalCharges: QuotationAdditionalCharge[];
+  subtotal: number;
+  total: number;
+  estimatedCompletionTime: string;
+  validUntil: string;
+  notes: string;
+  revisionNumber: number;
+  history: QuotationHistoryEvent[];
+  approvedAmount?: number;
+  approvedBy?: string | UserRef;
+  approvedAt?: string;
+  adminRemarks: string;
+  decidedAt?: string;
+  customerStatus: QuotationCustomerStatus;
+  respondedAt?: string;
+  paidAt?: string;
+  paymentId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Payout {
@@ -155,6 +236,7 @@ export interface Payout {
   commissionAmount: number;
   workerPayableAmount: number;
   status: "PENDING" | "PROCESSING" | "PAID" | "FAILED";
+  method?: string;
   providerPayoutRef?: string;
   paidAt?: string;
   note?: string;
@@ -174,6 +256,9 @@ export interface ServiceCategory {
   slug: string;
   description: string;
   icon: string;
+  keywords?: string[];
+  isActive?: boolean;
+  sortOrder?: number;
 }
 
 export interface ExtractedRequirements {
@@ -186,8 +271,43 @@ export interface ExtractedRequirements {
   search_ready: boolean;
 }
 
-export interface ChatResponse {
+export type ChatConversationStatus = "ACTIVE" | "ARCHIVED";
+
+export interface ChatMessageRecord {
+  role: "user" | "assistant";
+  content: string;
+  at: string;
+}
+
+export interface ChatConversationSummary {
+  conversationId: string;
   sessionKey: string;
+  title: string;
+  status: ChatConversationStatus;
+  lastMessage: string | null;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatConversation extends ChatConversationSummary {
+  messages: ChatMessageRecord[];
+  requirements: ExtractedRequirements;
+}
+
+export interface ChatConversationList {
+  items: ChatConversationSummary[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  hasNext?: boolean;
+}
+
+export interface ChatResponse {
+  conversationId: string;
+  sessionKey: string;
+  conversation: ChatConversationSummary;
   reply: string;
   requirements: ExtractedRequirements;
   workers: PublicWorker[];

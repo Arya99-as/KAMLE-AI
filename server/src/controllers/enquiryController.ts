@@ -164,27 +164,32 @@ export async function updateEnquiryStatus(req: Request<{ id: string }, unknown, 
   const actor: ActorRole = isAdmin ? "admin" : isWorker ? "worker" : "customer";
   const requestedStatus = req.body.status;
   const normalizedTarget = normalizeStatus(requestedStatus);
+  // Capture the persisted status BEFORE any mutation so validation and side
+  // effects reason about the real previous state, not the already-mutated one.
+  const previousStatus = normalizeStatus(String(enquiry.status));
 
   const allowedTransitions = TRANSITIONS[enquiry.status]?.[actor] ?? [];
   if (!allowedTransitions.includes(requestedStatus) && !allowedTransitions.includes(normalizedTarget)) {
     throw ApiError.badRequest("Cannot change request status from " + enquiry.status + " to " + requestedStatus + ". Unauthorized or invalid transition.");
   }
 
-  enquiry.status = normalizedTarget;
-
+  // Validate the optional service amount against the pre-mutation status.
+  // Previously this ran after `enquiry.status` had already been overwritten,
+  // so a PENDING -> COMPLETED transition silently allowed an amount change.
+  let nextAmount: number | null = null;
   if (req.body.serviceAmount !== undefined) {
-    const current = normalizeStatus(String(enquiry.status));
-    const target = normalizedTarget;
-    const allowedAmountChange = current === "PENDING" || current === "ACCEPTED" || target === "COMPLETED";
+    const allowedAmountChange = previousStatus === "PENDING" || previousStatus === "ACCEPTED" || normalizedTarget === "COMPLETED";
     if (!allowedAmountChange) {
       throw ApiError.badRequest("Service amount can only be updated while the request is pending, accepted, or when completing the job");
     }
-    const nextAmount = Number(req.body.serviceAmount);
+    nextAmount = Number(req.body.serviceAmount);
     if (!Number.isFinite(nextAmount) || nextAmount < 0) {
       throw ApiError.badRequest("Invalid service amount");
     }
-    enquiry.serviceAmount = nextAmount;
   }
+
+  enquiry.status = normalizedTarget;
+  if (nextAmount !== null) enquiry.serviceAmount = nextAmount;
 
   if (normalizedTarget === "DISPUTED") {
     enquiry.disputeReason = req.body.disputeReason || req.body.note || "Customer reported an issue";
@@ -201,7 +206,11 @@ export async function updateEnquiryStatus(req: Request<{ id: string }, unknown, 
 
   await enquiry.save();
 
-  if (normalizedTarget === "COMPLETED") {
+  // Count a completed job exactly once. A DISPUTED job was already counted when
+  // the worker first marked it COMPLETED, and resolving the dispute to COMPLETED
+  // must not increment the counter a second time.
+  const wasAlreadyCompleted = previousStatus === "COMPLETED" || previousStatus === "DISPUTED";
+  if (normalizedTarget === "COMPLETED" && !wasAlreadyCompleted) {
     await WorkerProfile.updateOne({ userId: enquiry.workerId }, { $inc: { completedEnquiries: 1 } });
   }
 

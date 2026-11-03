@@ -30,8 +30,13 @@ const reviewSchema = new Schema<IReview>(
   { timestamps: true },
 );
 
-// One review per completed enquiry, and one review per customer/worker pair.
-reviewSchema.index({ customerId: 1, workerId: 1 }, { unique: true });
+// One review per completed service request. A customer may review the same
+// worker again for a different job, so uniqueness is scoped to the enquiry.
+reviewSchema.index(
+  { customerId: 1, enquiryId: 1 },
+  { unique: true, partialFilterExpression: { enquiryId: { $type: "objectId" } } },
+);
+reviewSchema.index({ customerId: 1, workerId: 1 });
 reviewSchema.index({ workerId: 1, moderationStatus: 1, createdAt: -1 });
 reviewSchema.index({ enquiryId: 1 });
 

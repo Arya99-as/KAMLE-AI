@@ -54,6 +54,17 @@ function includesCI(list: string[], value: string): boolean {
   return list.some((item) => norm(item) === v || norm(item).includes(v) || v.includes(norm(item)));
 }
 
+/** Matches a required skill phrase against a worker skill, allowing keyword overlap. */
+function skillMatches(skill: string, required: string): boolean {
+  const a = norm(skill);
+  const b = norm(required);
+  if (!a || !b) return false;
+  if (a === b || a.includes(b) || b.includes(a)) return true;
+  const skillTokens = a.split(/[^\w]+/).filter((w) => w.length > 2);
+  const requiredTokens = b.split(/[^\w]+/).filter((w) => w.length > 2);
+  return requiredTokens.some((token) => skillTokens.includes(token));
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -73,8 +84,20 @@ function buildCandidateQuery(criteria: MatchCriteria): Record<string, unknown> {
   if (criteria.category) {
     query.serviceCategories = { $regex: escapeRegex(criteria.category.trim()), $options: "i" };
   }
-  if (criteria.skills && criteria.skills.length > 0) {
-    query.skills = { $regex: criteria.skills.map(escapeRegex).join("|"), $options: "i" };
+  // Skills are a soft ranking signal, not a hard eligibility gate. The AI
+  // frequently extracts long phrases ("Fan Wiring", "Electrical Wiring") that
+  // never appear verbatim in a worker's skill list even when the worker is a
+  // perfect trade match. When a category is present we therefore let scoring
+  // rank candidates instead of excluding them here. Without a category we
+  // still narrow candidates, but by individual keywords rather than phrases.
+  if (!criteria.category && criteria.skills && criteria.skills.length > 0) {
+    const tokens = criteria.skills
+      .flatMap((skill) => skill.split(/\s+/))
+      .map((word) => word.replace(/[^\w]/g, "").trim())
+      .filter((word) => word.length > 2);
+    if (tokens.length > 0) {
+      query.skills = { $regex: tokens.map(escapeRegex).join("|"), $options: "i" };
+    }
   }
   if (criteria.location) {
     query.serviceAreas = { $regex: escapeRegex(criteria.location.trim()), $options: "i" };
@@ -116,11 +139,18 @@ function scoreWorker(profile: IWorkerProfile, criteria: MatchCriteria, weights: 
   let matchedSkills: string[] = [];
 
   if (required.length > 0) {
-    matchedSkills = required.filter((req) => skills.some((s) => norm(s) === req || norm(s).includes(req) || req.includes(norm(s))));
+    matchedSkills = required.filter((req) => skills.some((s) => skillMatches(s, req)));
     skillValue = matchedSkills.length / required.length;
+    // A category match is meaningful even when the extracted skill wording
+    // differs, so give partial credit instead of ranking a genuine trade
+    // match at zero.
+    if (criteria.category && includesCI(profile.serviceCategories, criteria.category)) {
+      skillValue = Math.max(skillValue, matchedSkills.length > 0 ? 0.75 : 0.6);
+      if (matchedSkills.length === 0) reasons.push(`Works in ${criteria.category}`);
+    }
     if (matchedSkills.length > 0) {
       const pretty = matchedSkills.slice(0, 3).map((s) => {
-        const match = skills.find((x) => norm(x) === s || norm(x).includes(s));
+        const match = skills.find((x) => skillMatches(x, s));
         return match ?? s;
       });
       reasons.push(`Lists ${pretty.join(", ")} as a matching skill${pretty.length > 1 ? "s" : ""}`);

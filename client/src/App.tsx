@@ -22,6 +22,51 @@ function Lazy({ children }: { children: React.ReactNode }) {
 export function App() {
   return (
     <Routes>
+      {/* Dedicated Full-Screen Worker Workspace */}
+      <Route
+        path="account/worker"
+        element={
+          <RequireAuth roles={["worker"]}>
+            <Lazy>
+              <WorkerDashboard />
+            </Lazy>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="dashboard/worker/*"
+        element={
+          <RequireAuth roles={["worker"]}>
+            <Lazy>
+              <WorkerDashboard />
+            </Lazy>
+          </RequireAuth>
+        }
+      />
+
+      {/* Dedicated Full-Screen Admin Operations Console */}
+      <Route
+        path="account/admin"
+        element={
+          <RequireAuth roles={["admin"]}>
+            <Lazy>
+              <AdminDashboard />
+            </Lazy>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="dashboard/admin/*"
+        element={
+          <RequireAuth roles={["admin"]}>
+            <Lazy>
+              <AdminDashboard />
+            </Lazy>
+          </RequireAuth>
+        }
+      />
+
+      {/* Marketplace & Customer Layout */}
       <Route element={<MainLayout />}>
         <Route
           index
@@ -95,46 +140,6 @@ export function App() {
             <RequireAuth roles={["customer"]}>
               <Lazy>
                 <CustomerDashboard />
-              </Lazy>
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="account/worker"
-          element={
-            <RequireAuth roles={["worker"]}>
-              <Lazy>
-                <WorkerDashboard />
-              </Lazy>
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="dashboard/worker/*"
-          element={
-            <RequireAuth roles={["worker"]}>
-              <Lazy>
-                <WorkerDashboard />
-              </Lazy>
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="account/admin"
-          element={
-            <RequireAuth roles={["admin"]}>
-              <Lazy>
-                <AdminDashboard />
-              </Lazy>
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="dashboard/admin/*"
-          element={
-            <RequireAuth roles={["admin"]}>
-              <Lazy>
-                <AdminDashboard />
               </Lazy>
             </RequireAuth>
           }

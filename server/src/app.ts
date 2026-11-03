@@ -41,8 +41,10 @@ export function createApp(): Express {
     app.use(morgan(env.isProd ? "combined" : "dev"));
   }
 
-  // Serve uploaded portfolio images / documents.
-  app.use("/uploads", express.static(path.resolve(uploadRoot), { maxAge: "7d" }));
+  // Only public portfolio images are served statically. Verification documents
+  // live under uploadRoot/documents and are streamed exclusively to
+  // authenticated admins via GET /api/admin/workers/:id/documents/:index.
+  app.use("/uploads/images", express.static(path.join(uploadRoot, "images"), { maxAge: "7d" }));
 
   app.get("/", (_req, res) => {
     res.json({

@@ -2,26 +2,39 @@ import {
   AlertCircle,
   Briefcase,
   Check,
+  CheckCircle2,
+  CheckSquare,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   DollarSign,
-  Play,
+  FileText,
+  HelpCircle,
+  Inbox,
+  LayoutDashboard,
+  LogOut,
+  Menu,
   RefreshCw,
-  ShieldCheck,
-  X,
+  Search,
+  Star,
+  User,
 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
+  getCommissionRate,
+  getMyWorkerProfile,
   getWorkerEarnings,
   listEnquiries,
-  submitWorkerProfile,
   updateEnquiryStatus,
+  updateWorkerProfile,
 } from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
-import type { Enquiry, Payout } from "../../types";
-import { Badge, Button, Field, Input, Modal, Spinner, StatusBadge, Tabs } from "../../components/ui/primitives";
+import type { Enquiry, Payout, WorkerProfile } from "../../types";
+import { Badge, Button, Field, Input, Modal, Spinner, StatusBadge } from "../../components/ui/primitives";
 import { EmptyState } from "../../components/ui/states";
-import { Logo } from "../../components/brand/Logo";
+import { StatCard } from "../../components/dashboard/StatCard";
+import WorkerQuotations from "../../components/dashboard/WorkerQuotations";
 
 function otherParty(e: Enquiry, meId: string) {
   const ref = String(e.customerId) === meId ? e.workerId : e.customerId;
@@ -29,13 +42,21 @@ function otherParty(e: Enquiry, meId: string) {
 }
 
 export default function WorkerDashboard() {
-  const { user, workerProfile } = useAuth();
-  const meId = user?.id ?? "";
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
 
-  const [tab, setTab] = useState("Requests");
+  // Navigation State
+  const [navSection, setNavSection] = useState<
+    "overview" | "new_requests" | "active_jobs" | "completed_jobs" | "quotations" | "earnings" | "reviews" | "profile" | "settings"
+  >("overview");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Data State
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [received, setReceived] = useState<Enquiry[]>([]);
+  const [profile, setProfile] = useState<WorkerProfile | null>(null);
   const [earningsStats, setEarningsStats] = useState({
     totalGrossEarnings: 0,
     totalCommissionDeducted: 0,
@@ -44,29 +65,64 @@ export default function WorkerDashboard() {
     pendingPayouts: 0,
   });
   const [payouts, setPayouts] = useState<Payout[]>([]);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [commissionPercent, setCommissionPercent] = useState<number | null>(null);
 
+  // Search Filter
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Availability Toggle State (local state synced)
+  const [isAvailable, setIsAvailable] = useState(true);
+
+  // Job Completion Modal State
   const [completeModalEnquiry, setCompleteModalEnquiry] = useState<Enquiry | null>(null);
   const [finalAmount, setFinalAmount] = useState<number>(500);
   const [completeLoading, setCompleteLoading] = useState(false);
 
-  const [resubmitLoading, setResubmitLoading] = useState(false);
+  // Bank Account Modal / Edit State
+  const [bankModalOpen, setBankModalOpen] = useState(false);
+  const [bankForm, setBankForm] = useState({
+    accountHolderName: "",
+    bankName: "",
+    accountNumber: "",
+    ifsc: "",
+    upiId: "",
+  });
+  const [bankSaving, setBankSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setRefreshing(true);
+  const meId = user?.id ?? "";
+
+  const load = useCallback(async (showLoading = true) => {
+    if (showLoading) setRefreshing(true);
     try {
-      const [r, e] = await Promise.all([
+      const [r, e, profRes, rateRes] = await Promise.all([
         listEnquiries("received"),
         getWorkerEarnings().catch(() => ({ success: false, stats: null, payouts: [] })),
+        getMyWorkerProfile().catch(() => ({ workerProfile: null })),
+        getCommissionRate().catch(() => null),
       ]);
+
       setReceived(r.items);
-      if (e.success && e.stats) {
+
+      if (rateRes?.success) setCommissionPercent(rateRes.commissionPercent);
+
+      if (e && e.stats) {
         setEarningsStats(e.stats);
         setPayouts(e.payouts || []);
       }
+
+      if (profRes && profRes.workerProfile) {
+        setProfile(profRes.workerProfile);
+        if (profRes.workerProfile.availability) {
+          setIsAvailable(profRes.workerProfile.availability.availableNow ?? true);
+        }
+      }
+    } catch (err) {
+      console.error("WorkerDashboard load failed", err);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (showLoading) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
@@ -74,19 +130,12 @@ export default function WorkerDashboard() {
     void load();
   }, [load]);
 
-  const profile = workerProfile;
-  const approvalStatus = profile?.approvalStatus ?? "pending";
-  const isApproved = approvalStatus === "approved";
-  const isRejected = approvalStatus === "rejected";
-  const isPending = approvalStatus === "pending" || approvalStatus === "draft";
-
   async function updateStatus(id: string, next: string, note?: string, serviceAmount?: number) {
-    setActionError(null);
     try {
       await updateEnquiryStatus(id, next, note, serviceAmount);
-      await load();
+      await load(false);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Could not update the enquiry.");
+      alert(err instanceof Error ? err.message : "Could not update enquiry status.");
     }
   }
 
@@ -98,11 +147,11 @@ export default function WorkerDashboard() {
       await updateEnquiryStatus(
         completeModalEnquiry._id,
         "COMPLETED",
-        `Work completed. Billed amount: ₹${finalAmount}`,
+        `Work completed. Final billed amount: ₹${finalAmount}`,
         finalAmount
       );
       setCompleteModalEnquiry(null);
-      await load();
+      await load(false);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Could not complete request");
     } finally {
@@ -110,591 +159,902 @@ export default function WorkerDashboard() {
     }
   }
 
-  async function handleResubmitProfile() {
-    setResubmitLoading(true);
+  async function handleToggleAvailability() {
+    const nextState = !isAvailable;
+    setIsAvailable(nextState);
     try {
-      await submitWorkerProfile();
-      alert("Profile submitted for verification review!");
-      await load();
+      await updateWorkerProfile({
+        availability: {
+          availableNow: nextState,
+          days: profile?.availability?.days || ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+          note: profile?.availability?.note || "Standard working hours",
+        },
+      });
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Could not resubmit profile");
-    } finally {
-      setResubmitLoading(false);
+      console.error("Failed to update availability", err);
     }
   }
 
-  const pendingCount = received.filter((e) => ["PENDING", "SENT"].includes(String(e.status).toUpperCase())).length;
-  const activeCount = received.filter((e) => ["ACCEPTED", "IN_PROGRESS"].includes(String(e.status).toUpperCase())).length;
-  const completedCount = received.filter((e) => String(e.status).toUpperCase() === "COMPLETED").length;
+  async function handleSaveBankDetails(e: FormEvent) {
+    e.preventDefault();
+    setBankSaving(true);
+    try {
+      await updateWorkerProfile({
+        payoutAccount: {
+          ...bankForm,
+          status: "pending",
+          isVerified: false,
+        },
+      } as any);
+      setBankModalOpen(false);
+      await load(false);
+      alert("Bank & UPI details submitted for verification.");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to save bank details");
+    } finally {
+      setBankSaving(false);
+    }
+  }
+
+  function handleLogout() {
+    logout();
+    navigate("/login");
+  }
+
+  // Segmenting Enquiries cleanly (no duplication!)
+  const newRequests = received.filter((e) => {
+    const st = String(e.status).toUpperCase();
+    return st === "PENDING" || st === "SENT";
+  });
+
+  const activeJobs = received.filter((e) => {
+    const st = String(e.status).toUpperCase();
+    return st === "ACCEPTED" || st === "IN_PROGRESS";
+  });
+
+  const completedJobs = received.filter((e) => {
+    const st = String(e.status).toUpperCase();
+    return st === "COMPLETED";
+  });
+
+  // Calculate Profile Completion %
+  let completionScore = 30;
+  if (profile?.professionalDescription) completionScore += 20;
+  if ((profile?.skills || []).length > 0) completionScore += 15;
+  if ((profile?.serviceCategories || []).length > 0) completionScore += 15;
+  if (profile?.payoutAccount?.accountNumber || profile?.payoutAccount?.upiId) completionScore += 20;
+
+  // Filtered requests by search
+  function filterBySearch(list: Enquiry[]) {
+    if (!searchQuery.trim()) return list;
+    const q = searchQuery.toLowerCase();
+    return list.filter(
+      (e) =>
+        otherParty(e, meId).name.toLowerCase().includes(q) ||
+        (e.serviceCategory || "").toLowerCase().includes(q) ||
+        (e.problemDescription || "").toLowerCase().includes(q) ||
+        (e.location || "").toLowerCase().includes(q)
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50/60">
-      <div className="border-b border-line bg-white">
-        <div className="container-x flex flex-col gap-4 py-6 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
-            <Logo size="sm" />
-            <div>
-              <h1 className="text-2xl font-black tracking-tight text-ink">Work Center</h1>
-              <p className="mt-1 text-sm text-muted">Manage incoming jobs, track progress, and monitor earnings</p>
+    <div className="flex h-screen overflow-hidden bg-[#F5F8FD]">
+      {/* 1. COLLAPSIBLE LEFT WORKSPACE SIDEBAR */}
+      <aside
+        className={`bg-white border-r border-line flex flex-col shrink-0 transition-all duration-300 z-30 ${
+          sidebarCollapsed ? "w-20" : "w-64"
+        } hidden md:flex`}
+      >
+        {/* Brand Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-line">
+          <Link to="/" className="flex items-center gap-3 overflow-hidden">
+            <div className="h-9 w-9 rounded-xl bg-blue-600 flex items-center justify-center shrink-0 shadow-sm">
+              <Briefcase size={18} className="text-white" />
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" size="sm" onClick={() => load()} disabled={refreshing}>
-              <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} /> Refresh
-            </Button>
-            <Link to="/onboarding">
-              <Button variant="primary" size="sm">
-                <Briefcase size={14} /> Update Profile
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </div>
-
-      <div className="container-x py-6">
-        {isRejected && (
-          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-start gap-3">
-              <AlertCircle size={20} className="text-red-600 shrink-0 mt-0.5" />
+            {!sidebarCollapsed && (
               <div>
-                <p className="font-bold text-ink">Profile Verification Rejected</p>
-                <p className="mt-1 text-sm text-red-700">{profile?.rejectionReason || "Update your details and resubmit for review."}</p>
+                <div className="text-base font-black text-ink leading-tight">KAMLE AI</div>
+                <div className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">
+                  Worker Workspace
+                </div>
               </div>
-            </div>
-            <div className="flex gap-2">
-              <Link to="/onboarding">
-                <Button variant="secondary" size="sm">Edit Profile</Button>
-              </Link>
-              <Button variant="primary" size="sm" onClick={handleResubmitProfile} disabled={resubmitLoading} className="bg-red-600 hover:bg-red-700">
-                {resubmitLoading ? "Submitting..." : "Resubmit"}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {isPending && (
-          <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 flex items-start gap-3">
-            <Clock size={20} className="text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold text-ink">Verification Under Review</p>
-              <p className="mt-1 text-sm text-amber-700">Your profile is being reviewed. You'll appear in search results once approved.</p>
-            </div>
-          </div>
-        )}
-
-        {isApproved && (
-          <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShieldCheck size={18} className="text-emerald-600" />
-              <span className="text-sm font-semibold text-emerald-900">Verified Professional — Visible in public search</span>
-            </div>
-            <Link to="/onboarding" className="text-sm font-semibold text-emerald-800 hover:underline">Manage Profile</Link>
-          </div>
-        )}
-
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted">New Requests</span>
-              <Briefcase size={16} className="text-brand-600" />
-            </div>
-            <p className="mt-2 text-2xl font-black text-ink">{pendingCount}</p>
-            <p className="mt-1 text-xs text-muted">Awaiting your response</p>
-          </div>
-          <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Active Jobs</span>
-              <Play size={16} className="text-blue-600" />
-            </div>
-            <p className="mt-2 text-2xl font-black text-ink">{activeCount}</p>
-            <p className="mt-1 text-xs text-muted">In progress</p>
-          </div>
-          <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Completed</span>
-              <Check size={16} className="text-emerald-600" />
-            </div>
-            <p className="mt-2 text-2xl font-black text-ink">{completedCount}</p>
-            <p className="mt-1 text-xs text-muted">Jobs finished</p>
-          </div>
-          <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Net Earnings</span>
-              <DollarSign size={16} className="text-emerald-600" />
-            </div>
-            <p className="mt-2 text-2xl font-black text-ink">₹{earningsStats.netPayable}</p>
-            <p className="mt-1 text-xs text-muted">Pending: ₹{earningsStats.pendingPayouts}</p>
-          </div>
+            )}
+          </Link>
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="p-1.5 rounded-lg text-muted hover:bg-slate-100 hover:text-ink transition"
+          >
+            {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          </button>
         </div>
 
-        {actionError && (
-          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{actionError}</div>
-        )}
+        {/* Navigation Items */}
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+          <button
+            onClick={() => setNavSection("overview")}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition ${
+              navSection === "overview"
+                ? "bg-blue-50 text-blue-700 font-extrabold shadow-sm"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            <LayoutDashboard size={18} className="shrink-0" />
+            {!sidebarCollapsed && <span>Overview</span>}
+          </button>
 
-        <div className="mt-6 overflow-hidden rounded-2xl border border-line bg-white shadow-sm">
-          <div className="border-b border-line px-5 py-4">
-            <Tabs tabs={["Requests", "Earnings", "Profile"]} active={tab} onChange={setTab} />
+          <button
+            onClick={() => setNavSection("new_requests")}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition ${
+              navSection === "new_requests"
+                ? "bg-blue-50 text-blue-700 font-extrabold shadow-sm"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Inbox size={18} className="shrink-0" />
+              {!sidebarCollapsed && <span>New Requests</span>}
+            </div>
+            {!sidebarCollapsed && newRequests.length > 0 && (
+              <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                {newRequests.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setNavSection("active_jobs")}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition ${
+              navSection === "active_jobs"
+                ? "bg-blue-50 text-blue-700 font-extrabold shadow-sm"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Clock size={18} className="shrink-0" />
+              {!sidebarCollapsed && <span>Active Jobs</span>}
+            </div>
+            {!sidebarCollapsed && activeJobs.length > 0 && (
+              <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                {activeJobs.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setNavSection("completed_jobs")}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition ${
+              navSection === "completed_jobs"
+                ? "bg-blue-50 text-blue-700 font-extrabold shadow-sm"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            <CheckSquare size={18} className="shrink-0" />
+            {!sidebarCollapsed && <span>Completed Jobs</span>}
+          </button>
+
+          <button
+            onClick={() => setNavSection("quotations")}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition ${
+              navSection === "quotations"
+                ? "bg-blue-50 text-blue-700 font-extrabold shadow-sm"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            <FileText size={18} className="shrink-0" />
+            {!sidebarCollapsed && <span>Service Pricing / Quotations</span>}
+          </button>
+
+          <button
+            onClick={() => setNavSection("earnings")}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition ${
+              navSection === "earnings"
+                ? "bg-blue-50 text-blue-700 font-extrabold shadow-sm"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            <DollarSign size={18} className="shrink-0 text-emerald-600" />
+            {!sidebarCollapsed && <span>Earnings & Payouts</span>}
+          </button>
+
+          <button
+            onClick={() => setNavSection("reviews")}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition ${
+              navSection === "reviews"
+                ? "bg-blue-50 text-blue-700 font-extrabold shadow-sm"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            <Star size={18} className="shrink-0 text-amber-500" />
+            {!sidebarCollapsed && <span>Ratings & Reviews</span>}
+          </button>
+
+          <div className="pt-4 pb-1">
+            <div className="border-t border-line my-2" />
           </div>
-          <div className="p-5">
-            {loading ? (
-              <div className="py-16 text-center">
-                <Spinner />
-              </div>
-            ) : (
-              <>
-                {tab === "Requests" && (
-                  <div>
-                    {received.length === 0 ? (
-                      <EmptyState title="No requests yet" message="When clients reach out to your verified profile, jobs will appear here." />
-                    ) : (
-                      <div className="space-y-3">
-                        {received.map((e) => {
-                          const st = String(e.status).toUpperCase();
-                          const customer = otherParty(e, meId);
-                          const isPending = st === "PENDING" || st === "SENT";
-                          const isAccepted = st === "ACCEPTED";
-                          const isInProgress = st === "IN_PROGRESS";
-                          const isPaid = e.paymentStatus === "PAID";
-                          const isDisputed = st === "DISPUTED";
 
-                          return (
-                            <div key={e._id} className="rounded-xl border border-line p-4 transition hover:border-brand-200 hover:shadow-sm">
-                              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                                <div className="space-y-2">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="font-semibold text-ink">{customer.name}</span>
-                                    <Badge tone="brand">{e.serviceCategory}</Badge>
-                                    <StatusBadge status={e.status} />
-                                    {isPaid && (
-                                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
-                                        <Check size={12} /> Paid
+          <Link
+            to="/worker/onboarding"
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition"
+          >
+            <User size={18} className="shrink-0" />
+            {!sidebarCollapsed && <span>Profile & Skills</span>}
+          </Link>
+
+          <Link
+            to="/support"
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition"
+          >
+            <HelpCircle size={18} className="shrink-0" />
+            {!sidebarCollapsed && <span>Support & Guidelines</span>}
+          </Link>
+        </nav>
+
+        {/* Sidebar Footer Logout */}
+        <div className="p-3 border-t border-line">
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 transition"
+          >
+            <LogOut size={18} className="shrink-0" />
+            {!sidebarCollapsed && <span>Logout</span>}
+          </button>
+        </div>
+      </aside>
+
+      {/* 2. MAIN WORKSPACE VIEW */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Workspace Top Header */}
+        <header className="h-16 border-b border-line bg-white flex items-center justify-between px-4 sm:px-6 shrink-0 z-20">
+          <div className="flex items-center gap-3 flex-1 max-w-md">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="md:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100"
+            >
+              <Menu size={20} />
+            </button>
+
+            {/* Live Search */}
+            <div className="relative w-full">
+              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search jobs, client names, locations..."
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 py-2 text-xs font-medium text-ink focus:border-blue-600 focus:bg-white focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Live Availability Toggle */}
+            <button
+              onClick={handleToggleAvailability}
+              className={`flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-bold transition border ${
+                isAvailable
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  : "bg-slate-100 text-slate-600 border-slate-200"
+              }`}
+              title="Click to toggle availability"
+            >
+              <span
+                className={`h-2.5 w-2.5 rounded-full ${
+                  isAvailable ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
+                }`}
+              />
+              <span className="hidden sm:inline">
+                {isAvailable ? "Online & Available" : "Offline / Busy"}
+              </span>
+            </button>
+
+            {/* Refresh */}
+            <button
+              onClick={() => load(true)}
+              disabled={refreshing}
+              className="p-2 rounded-xl text-slate-600 hover:bg-slate-100 transition"
+              title="Refresh Data"
+            >
+              <RefreshCw size={17} className={refreshing ? "animate-spin" : ""} />
+            </button>
+
+            {/* Profile Avatar Pill */}
+            <div className="flex items-center gap-2 pl-2 border-l border-line">
+              <div className="h-8 w-8 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center">
+                {user?.name?.[0]?.toUpperCase() ?? "W"}
+              </div>
+              <div className="hidden sm:block text-left">
+                <div className="text-xs font-bold text-ink leading-tight">{user?.name}</div>
+                <div className="text-[10px] text-muted leading-tight">Pro Worker</div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Scrollable Main Content */}
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">
+          {loading ? (
+            <div className="py-24 text-center">
+              <Spinner />
+              <p className="mt-3 text-sm text-muted">Loading your work workspace...</p>
+            </div>
+          ) : (
+            <>
+              {/* A. WELCOME & STATUS SECTION */}
+              <div className="rounded-3xl border border-line bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h1 className="text-2xl font-black text-ink">Welcome back, {user?.name}!</h1>
+                      {profile?.verificationStatus === "verified" ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 border border-emerald-200">
+                          <CheckCircle2 size={13} /> Verified Pro
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 border border-amber-200">
+                          <AlertCircle size={13} /> Verification Under Review
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs text-muted">
+                      Manage client requests, update job milestones, and track your Razorpay earnings.
+                    </p>
+                  </div>
+
+                  {/* Profile Completion Meter */}
+                  <div className="rounded-2xl bg-slate-50 p-3.5 border border-line min-w-[220px]">
+                    <div className="flex justify-between text-xs font-bold text-ink mb-1.5">
+                      <span>Profile Strength</span>
+                      <span className="text-blue-600">{completionScore}%</span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                      <div
+                        className="h-full bg-blue-600 rounded-full transition-all duration-500"
+                        style={{ width: `${completionScore}%` }}
+                      />
+                    </div>
+                    {completionScore < 100 && (
+                      <button
+                        onClick={() => setBankModalOpen(true)}
+                        className="mt-2 text-[11px] font-semibold text-blue-600 hover:underline block text-left"
+                      >
+                        + Add bank details to reach 100%
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* B. 4 STATISTICS KPI CARDS */}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <StatCard
+                  title="New Requests"
+                  value={newRequests.length}
+                  icon={Inbox}
+                  sub="Awaiting your response"
+                  tone="blue"
+                  onClick={() => setNavSection("new_requests")}
+                />
+                <StatCard
+                  title="Active Jobs"
+                  value={activeJobs.length}
+                  icon={Clock}
+                  sub="Work in progress"
+                  tone="amber"
+                  onClick={() => setNavSection("active_jobs")}
+                />
+                <StatCard
+                  title="Completed Jobs"
+                  value={completedJobs.length}
+                  icon={CheckCircle2}
+                  sub="Successfully finished"
+                  tone="emerald"
+                  onClick={() => setNavSection("completed_jobs")}
+                />
+                <StatCard
+                  title="Net Earnings"
+                  value={`₹${earningsStats.netPayable.toLocaleString()}`}
+                  icon={DollarSign}
+                  sub={`₹${earningsStats.pendingPayouts} awaiting admin transfer`}
+                  tone="purple"
+                  onClick={() => setNavSection("earnings")}
+                />
+              </div>
+
+              {/* C. JOB MANAGEMENT SECTION (Filterable views) */}
+              {(navSection === "overview" ||
+                navSection === "new_requests" ||
+                navSection === "active_jobs" ||
+                navSection === "completed_jobs") && (
+                <div className="rounded-3xl border border-line bg-white shadow-sm overflow-hidden">
+                  {/* Job Segment Tabs */}
+                  <div className="flex border-b border-line bg-slate-50/50 px-4 pt-2 overflow-x-auto">
+                    <button
+                      onClick={() => setNavSection("overview")}
+                      className={`flex items-center gap-2 border-b-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap ${
+                        navSection === "overview"
+                          ? "border-blue-600 text-blue-600 bg-white rounded-t-xl"
+                          : "border-transparent text-muted hover:text-ink"
+                      }`}
+                    >
+                      All Requests ({received.length})
+                    </button>
+
+                    <button
+                      onClick={() => setNavSection("new_requests")}
+                      className={`flex items-center gap-2 border-b-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap ${
+                        navSection === "new_requests"
+                          ? "border-blue-600 text-blue-600 bg-white rounded-t-xl"
+                          : "border-transparent text-muted hover:text-ink"
+                      }`}
+                    >
+                      New Requests
+                      {newRequests.length > 0 && (
+                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] text-blue-700 font-extrabold">
+                          {newRequests.length}
+                        </span>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => setNavSection("active_jobs")}
+                      className={`flex items-center gap-2 border-b-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap ${
+                        navSection === "active_jobs"
+                          ? "border-blue-600 text-blue-600 bg-white rounded-t-xl"
+                          : "border-transparent text-muted hover:text-ink"
+                      }`}
+                    >
+                      Active Jobs
+                      {activeJobs.length > 0 && (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-700 font-extrabold">
+                          {activeJobs.length}
+                        </span>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => setNavSection("completed_jobs")}
+                      className={`flex items-center gap-2 border-b-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap ${
+                        navSection === "completed_jobs"
+                          ? "border-blue-600 text-blue-600 bg-white rounded-t-xl"
+                          : "border-transparent text-muted hover:text-ink"
+                      }`}
+                    >
+                      Completed Jobs ({completedJobs.length})
+                    </button>
+                  </div>
+
+                  {/* Job List Content */}
+                  <div className="p-6">
+                    {(() => {
+                      const displayedList =
+                        navSection === "new_requests"
+                          ? filterBySearch(newRequests)
+                          : navSection === "active_jobs"
+                          ? filterBySearch(activeJobs)
+                          : navSection === "completed_jobs"
+                          ? filterBySearch(completedJobs)
+                          : filterBySearch(received);
+
+                      if (displayedList.length === 0) {
+                        return (
+                          <EmptyState
+                            title="No enquiries in this section"
+                            message="When customers in your area request service quotes, they will appear here with contact details."
+                          />
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-4">
+                          {displayedList.map((e) => {
+                            const st = String(e.status).toUpperCase();
+                            const customer = otherParty(e, meId);
+                            const isPending = st === "PENDING" || st === "SENT";
+                            const isAccepted = st === "ACCEPTED";
+                            const isInProgress = st === "IN_PROGRESS";
+                            const isCompleted = st === "COMPLETED";
+
+                            return (
+                              <div
+                                key={e._id}
+                                className="rounded-2xl border border-line bg-white p-5 shadow-sm transition hover:border-blue-200 hover:shadow-md"
+                              >
+                                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                  {/* Left Customer Info */}
+                                  <div className="space-y-2 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-bold text-base text-ink">{customer.name}</span>
+                                      <Badge tone="brand">{e.serviceCategory}</Badge>
+                                      <StatusBadge status={e.status} />
+
+                                      {isCompleted && e.paymentStatus === "PAID" && (
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
+                                          <Check size={12} /> Customer Paid ₹{e.serviceAmount}
+                                        </span>
+                                      )}
+                                      {isCompleted && e.paymentStatus !== "PAID" && (
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-700 border border-amber-200">
+                                          Awaiting Customer Payment (₹{e.serviceAmount})
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <p className="text-sm text-slate-700 font-medium leading-relaxed">
+                                      {e.problemDescription}
+                                    </p>
+
+                                    <div className="flex flex-wrap items-center gap-4 text-xs text-muted">
+                                      {e.location && <span>📍 Client Address: {e.location}</span>}
+                                      <span>📅 {new Date(e.createdAt).toLocaleDateString()}</span>
+                                      {e.serviceAmount && (
+                                        <span className="font-bold text-slate-900">
+                                          Billed Amount: ₹{e.serviceAmount}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Right Worker Action Buttons */}
+                                  <div className="flex flex-wrap items-center gap-2 lg:flex-col lg:items-end shrink-0">
+                                    {/* Action for New Pending Requests */}
+                                    {isPending && (
+                                      <div className="flex items-center gap-2">
+                                        <Button
+                                          variant="primary"
+                                          size="sm"
+                                          onClick={() => updateStatus(e._id, "ACCEPTED", "Accepted by professional")}
+                                          className="bg-blue-600 hover:bg-blue-700 font-bold"
+                                        >
+                                          Accept Job
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => updateStatus(e._id, "REJECTED", "Worker unavailable")}
+                                          className="text-rose-600 hover:bg-rose-50 text-xs"
+                                        >
+                                          Decline
+                                        </Button>
+                                      </div>
+                                    )}
+
+                                    {/* Action for Accepted Jobs */}
+                                    {isAccepted && (
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={() => updateStatus(e._id, "IN_PROGRESS", "Started work")}
+                                        className="font-bold text-xs"
+                                      >
+                                        Start Work
+                                      </Button>
+                                    )}
+
+                                    {/* Action for Ongoing Work */}
+                                    {(isAccepted || isInProgress) && (
+                                      <Button
+                                        variant="primary"
+                                        size="sm"
+                                        onClick={() => {
+                                          setCompleteModalEnquiry(e);
+                                          setFinalAmount(e.serviceAmount || 500);
+                                        }}
+                                        className="bg-emerald-600 hover:bg-emerald-700 font-bold text-white shadow-sm"
+                                      >
+                                        <CheckCircle2 size={14} className="mr-1" /> Mark Completed
+                                      </Button>
+                                    )}
+
+                                    {isCompleted && (
+                                      <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100">
+                                        Job Closed
                                       </span>
                                     )}
                                   </div>
-                                  <p className="text-sm text-ink">{e.problemDescription}</p>
-                                  {e.location && <p className="text-xs text-muted">Client Location: {e.location}</p>}
-                                  {e.serviceAmount ? <p className="text-xs font-semibold text-brand-700">Quoted Amount: ₹{e.serviceAmount}</p> : null}
-                                  {isDisputed && e.disputeReason && (
-                                    <div className="rounded-lg bg-amber-50 p-2.5 text-xs text-amber-800">
-                                      <strong>Dispute:</strong> {e.disputeReason}
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2 lg:flex-col lg:items-end">
-                                  {isPending && (
-                                    <>
-                                      <Button variant="primary" size="sm" onClick={() => updateStatus(e._id, "ACCEPTED")} className="bg-emerald-600 hover:bg-emerald-700">
-                                        <Check size={14} /> Accept
-                                      </Button>
-                                      <Button variant="secondary" size="sm" onClick={() => updateStatus(e._id, "REJECTED")} className="text-red-600 hover:bg-red-50">
-                                        <X size={14} /> Reject
-                                      </Button>
-                                    </>
-                                  )}
-                                  {isAccepted && (
-                                    <Button variant="primary" size="sm" onClick={() => updateStatus(e._id, "IN_PROGRESS", "Worker started the work")}>
-                                      <Play size={14} /> Start Work
-                                    </Button>
-                                  )}
-                                  {isInProgress && (
-                                    <Button
-                                      variant="primary"
-                                      size="sm"
-                                      onClick={() => {
-                                        setCompleteModalEnquiry(e);
-                                        setFinalAmount(e.serviceAmount || 500);
-                                      }}
-                                      className="bg-emerald-600 hover:bg-emerald-700"
-                                    >
-                                      <Check size={14} /> Mark Complete
-                                    </Button>
-                                  )}
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* D. SERVICE PRICING / QUOTATIONS SECTION */}
+              {navSection === "quotations" && <WorkerQuotations enquiries={received} />}
+
+              {/* D. EARNINGS & PAYOUTS SECTION */}
+              {navSection === "earnings" && (
+                <div className="space-y-6">
+                  {/* Earnings Breakdown Cards */}
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+                      <div className="text-xs font-bold uppercase tracking-wider text-muted">
+                        Gross Earnings
+                      </div>
+                      <div className="mt-2 text-2xl font-black text-ink">
+                        ₹{earningsStats.totalGrossEarnings.toLocaleString()}
+                      </div>
+                      <p className="mt-1 text-xs text-muted">Total value of completed jobs</p>
+                    </div>
+
+                    <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+                      <div className="text-xs font-bold uppercase tracking-wider text-muted">
+                        Platform Commission{commissionPercent !== null ? ` (${commissionPercent}%)` : ""}
+                      </div>
+                      <div className="mt-2 text-2xl font-black text-slate-700">
+                        ₹{earningsStats.totalCommissionDeducted.toLocaleString()}
+                      </div>
+                      <p className="mt-1 text-xs text-muted">Retained for marketplace & payments</p>
+                    </div>
+
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5 shadow-sm">
+                      <div className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+                        Net Payable Share
+                      </div>
+                      <div className="mt-2 text-2xl font-black text-emerald-700">
+                        ₹{earningsStats.netPayable.toLocaleString()}
+                      </div>
+                      <p className="mt-1 text-xs text-emerald-600">Your net share after platform commission</p>
+                    </div>
+                  </div>
+
+                  {/* Bank / Payout Account Card */}
+                  <div className="rounded-3xl border border-line bg-white p-6 shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-line pb-4">
+                      <div>
+                        <h3 className="text-base font-bold text-ink">Bank & UPI Payout Account</h3>
+                        <p className="text-xs text-muted">
+                          Funds from completed jobs are disbursed directly to your verified bank account or UPI ID.
+                        </p>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setBankModalOpen(true)}
+                        className="text-xs font-bold"
+                      >
+                        {profile?.payoutAccount?.accountNumber ? "Update Bank Details" : "+ Add Bank Account"}
+                      </Button>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+                      <div className="rounded-xl bg-slate-50 p-3.5 border border-line">
+                        <span className="text-muted block font-medium">Account Holder</span>
+                        <span className="font-bold text-ink text-sm">
+                          {profile?.payoutAccount?.accountHolderName || user?.name || "Not provided"}
+                        </span>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 p-3.5 border border-line">
+                        <span className="text-muted block font-medium">Bank Name</span>
+                        <span className="font-bold text-ink text-sm">
+                          {profile?.payoutAccount?.bankName || "Not provided"}
+                        </span>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 p-3.5 border border-line">
+                        <span className="text-muted block font-medium">Account Number</span>
+                        <span className="font-mono font-bold text-ink text-sm">
+                          {profile?.payoutAccount?.accountNumber
+                            ? `•••• ${profile.payoutAccount.accountNumber.slice(-4)}`
+                            : "Not provided"}
+                        </span>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 p-3.5 border border-line">
+                        <span className="text-muted block font-medium">UPI ID</span>
+                        <span className="font-mono font-bold text-blue-600 text-sm">
+                          {profile?.payoutAccount?.upiId || "Not provided"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Payout History Ledger */}
+                  <div className="rounded-3xl border border-line bg-white shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-line">
+                      <h3 className="text-base font-bold text-ink">Payout Settlement Ledger</h3>
+                      <p className="text-xs text-muted">History of transfers processed by KAMLE AI</p>
+                    </div>
+
+                    {payouts.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-muted">
+                        No payout disbursements recorded yet. Payouts are queued automatically once customer payments settle.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50 border-b border-line font-bold uppercase tracking-wider text-muted">
+                            <tr>
+                              <th className="px-6 py-3.5">Disbursement Amount</th>
+                              <th className="px-6 py-3.5">Status</th>
+                              <th className="px-6 py-3.5">Payout Method</th>
+                              <th className="px-6 py-3.5">Reference ID</th>
+                              <th className="px-6 py-3.5">Date</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-line">
+                            {payouts.map((po) => (
+                              <tr key={po._id} className="hover:bg-slate-50/70 transition">
+                                <td className="px-6 py-4 font-black text-ink text-sm">
+                                  ₹{po.workerPayableAmount}
+                                </td>
+                                <td className="px-6 py-4">
+                                  <span
+                                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                                      po.status === "PAID"
+                                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                        : "bg-amber-50 text-amber-700 border border-amber-200"
+                                    }`}
+                                  >
+                                    {po.status}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 uppercase font-semibold text-slate-700">
+                                  {po.method || "Manual NEFT/UPI"}
+                                </td>
+                                <td className="px-6 py-4 font-mono text-muted">
+                                  {po.providerPayoutRef || po._id}
+                                </td>
+                                <td className="px-6 py-4 text-muted">
+                                  {new Date(po.createdAt).toLocaleDateString()}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     )}
                   </div>
-                )}
-
-                {tab === "Earnings" && (
-                  <div className="space-y-6">
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                      <div className="rounded-xl border border-line p-4">
-                        <span className="text-xs font-semibold text-muted">Gross Revenue</span>
-                        <p className="mt-1 text-xl font-black text-ink">₹{earningsStats.totalGrossEarnings}</p>
-                      </div>
-                      <div className="rounded-xl border border-line p-4">
-                        <span className="text-xs font-semibold text-muted">Platform Fee (10%)</span>
-                        <p className="mt-1 text-xl font-black text-muted">₹{earningsStats.totalCommissionDeducted}</p>
-                      </div>
-                      <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-4">
-                        <span className="text-xs font-semibold text-brand-700">Net Payable</span>
-                        <p className="mt-1 text-xl font-black text-brand-700">₹{earningsStats.netPayable}</p>
-                      </div>
-                      <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
-                        <span className="text-xs font-semibold text-amber-700">Pending Payouts</span>
-                        <p className="mt-1 text-xl font-black text-amber-700">₹{earningsStats.pendingPayouts}</p>
-                      </div>
-                    </div>
-
-                    <div>
-                      <h3 className="text-base font-bold text-ink">Payout History</h3>
-                      {payouts.length === 0 ? (
-                        <div className="mt-3 rounded-xl border border-line p-8 text-center text-sm text-muted">No payouts yet.</div>
-                      ) : (
-                        <div className="mt-3 overflow-x-auto">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="border-b border-line text-left">
-                                <th className="pb-2 pr-4 font-semibold text-muted">Net Payable</th>
-                                <th className="pb-2 pr-4 font-semibold text-muted">Status</th>
-                                <th className="pb-2 pr-4 font-semibold text-muted">Gross / Commission</th>
-                                <th className="pb-2 pr-4 font-semibold text-muted">Reference</th>
-                                <th className="pb-2 font-semibold text-muted">Date</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {payouts.map((po) => (
-                                <tr key={po._id} className="border-b border-line/60">
-                                  <td className="py-3 pr-4 font-semibold text-ink">₹{po.workerPayableAmount}</td>
-                                  <td className="py-3 pr-4">
-                                    <span
-                                      className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                                        po.status === "PAID"
-                                          ? "bg-emerald-50 text-emerald-700"
-                                          : po.status === "PROCESSING"
-                                          ? "bg-blue-50 text-blue-700"
-                                          : "bg-amber-50 text-amber-700"
-                                      }`}
-                                    >
-                                      {po.status}
-                                    </span>
-                                  </td>
-                                  <td className="py-3 pr-4 text-muted">
-                                    ₹{po.serviceAmount} / -₹{po.commissionAmount}
-                                  </td>
-                                  <td className="py-3 pr-4 font-mono text-xs text-muted">{po.providerPayoutRef || "-"}</td>
-                                  <td className="py-3 text-muted">{new Date(po.createdAt).toLocaleDateString()}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {tab === "Profile" && (
-                  <div className="max-w-2xl space-y-4">
-                    <div className="rounded-xl border border-line p-5">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-bold text-ink">{user?.name}</h3>
-                        <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">{approvalStatus.toUpperCase()}</span>
-                      </div>
-                      <p className="mt-2 text-sm text-ink">{profile?.professionalDescription || "No bio added yet"}</p>
-                      <div className="mt-4">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-muted">Categories</span>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {(profile?.serviceCategories || []).map((c) => (
-                            <Badge key={c} tone="brand">
-                              {c}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="mt-4">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-muted">Skills</span>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {(profile?.skills || []).map((s) => (
-                            <span key={s} className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
-                              {s}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="mt-5">
-                        <Link to="/onboarding">
-                          <Button variant="primary">Edit Profile & Pricing</Button>
-                        </Link>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="py-20 text-center">
-          <Spinner />
-        </div>
-      ) : (
-        <div className="mt-6">
-          {tab === "Requests" && (
-            <div>
-              {received.length === 0 ? (
-                <EmptyState
-                  title="No requests yet"
-                  message="When clients discover your verified profile and send service enquiries, they will appear here."
-                />
-              ) : (
-                <div className="space-y-4">
-                  {received.map((e) => {
-                    const st = String(e.status).toUpperCase();
-                    const customer = otherParty(e, meId);
-                    const isPending = st === "PENDING" || st === "SENT";
-                    const isAccepted = st === "ACCEPTED";
-                    const isInProgress = st === "IN_PROGRESS";
-                    const isPaid = e.paymentStatus === "PAID";
-                    const isDisputed = st === "DISPUTED";
-
-                    return (
-                      <div key={e._id} className="card p-5 transition hover:border-brand-200">
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-ink">{customer.name}</span>
-                              <Badge tone="brand">{e.serviceCategory}</Badge>
-                              <StatusBadge status={e.status} />
-                              {isPaid && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
-                                  <Check size={12} /> Paid by Client
-                                </span>
-                              )}
-                            </div>
-                            <p className="mt-2 text-sm text-ink">{e.problemDescription}</p>
-                            {e.location && <p className="mt-1 text-xs text-muted">📍 Client Address: {e.location}</p>}
-                            {e.serviceAmount ? (
-                              <p className="mt-1 text-xs font-semibold text-brand-700">Service Fee: ₹{e.serviceAmount}</p>
-                            ) : null}
-                            {isDisputed && e.disputeReason && (
-                              <div className="mt-2 rounded-lg bg-amber-50 p-2.5 text-xs text-amber-800 border border-amber-200">
-                                <strong>Client Dispute:</strong> {e.disputeReason}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-2 sm:flex-col sm:items-end">
-                            {isPending && (
-                              <>
-                                <Button
-                                  variant="primary"
-                                  size="sm"
-                                  onClick={() => updateStatus(e._id, "ACCEPTED")}
-                                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                                >
-                                  <Check size={14} /> Accept Request
-                                </Button>
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  onClick={() => updateStatus(e._id, "REJECTED")}
-                                  className="text-red-600 hover:bg-red-50"
-                                >
-                                  <X size={14} /> Reject
-                                </Button>
-                              </>
-                            )}
-
-                            {isAccepted && (
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                onClick={() => updateStatus(e._id, "IN_PROGRESS", "Worker started the work")}
-                              >
-                                <Play size={14} /> Start Work
-                              </Button>
-                            )}
-
-                            {isInProgress && (
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                onClick={() => {
-                                  setCompleteModalEnquiry(e);
-                                  setFinalAmount(e.serviceAmount || 500);
-                                }}
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                              >
-                                <Check size={14} /> Mark Work Completed
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
                 </div>
               )}
-            </div>
-          )}
 
-          {tab === "Earnings" && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <div className="card p-4">
-                  <span className="text-xs font-medium text-muted">Gross Revenue</span>
-                  <p className="mt-1 text-2xl font-bold text-ink">₹{earningsStats.totalGrossEarnings}</p>
-                  <span className="text-xs text-muted">Total service billings</span>
-                </div>
-                <div className="card p-4">
-                  <span className="text-xs font-medium text-muted">Platform Fee</span>
-                  <p className="mt-1 text-2xl font-bold text-muted">₹{earningsStats.totalCommissionDeducted}</p>
-                  <span className="text-xs text-muted">Platform commission (10%)</span>
-                </div>
-                <div className="card p-4 border-brand-200 bg-brand-50/40">
-                  <span className="text-xs font-medium text-brand-700">Net Worker Earnings</span>
-                  <p className="mt-1 text-2xl font-bold text-brand-700">₹{earningsStats.netPayable}</p>
-                  <span className="text-xs text-brand-600">Your total payable amount</span>
-                </div>
-                <div className="card p-4">
-                  <span className="text-xs font-medium text-amber-700">Pending Payouts</span>
-                  <p className="mt-1 text-2xl font-bold text-amber-700">₹{earningsStats.pendingPayouts}</p>
-                  <span className="text-xs text-muted">Awaiting admin transfer</span>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="text-base font-bold text-ink mb-3">Payout Ledger</h3>
-                {payouts.length === 0 ? (
-                  <div className="card p-8 text-center text-sm text-muted">
-                    No payouts recorded yet. When clients complete payments for your work, payouts are automatically tracked here.
+              {/* E. RATINGS & REVIEWS SECTION */}
+              {navSection === "reviews" && (
+                <div className="rounded-3xl border border-line bg-white p-6 shadow-sm space-y-4">
+                  <div className="border-b border-line pb-4">
+                    <h3 className="text-base font-bold text-ink">Client Ratings & Feedback</h3>
+                    <p className="text-xs text-muted">Public reviews submitted by clients upon job completion</p>
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {payouts.map((po) => {
-                      const isPaid = po.status === "PAID";
-                      const isProcessing = po.status === "PROCESSING";
 
-                      return (
-                        <div key={po._id} className="card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-ink text-base">₹{po.workerPayableAmount}</span>
-                              <span
-                                className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                                  isPaid
-                                    ? "bg-emerald-100 text-emerald-800"
-                                    : isProcessing
-                                    ? "bg-blue-100 text-blue-800"
-                                    : "bg-amber-100 text-amber-800"
-                                }`}
-                              >
-                                {po.status}
-                              </span>
-                              <span className="text-xs text-muted">
-                                Gross: ₹{po.serviceAmount} | Comm: -₹{po.commissionAmount}
-                              </span>
-                            </div>
-                            {po.providerPayoutRef && (
-                              <p className="text-xs text-muted mt-1 font-mono">Reference: {po.providerPayoutRef}</p>
-                            )}
-                            <p className="text-xs text-muted">
-                              Created: {new Date(po.createdAt).toLocaleDateString()}
-                              {po.paidAt && ` | Paid: ${new Date(po.paidAt).toLocaleDateString()}`}
-                            </p>
-                          </div>
-                          <div>
-                            <span className="text-xs font-medium text-slate-500">
-                              {isPaid ? "Disbursed to Bank" : "Scheduled for Net-7 Transfer"}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div className="flex items-center gap-4 p-4 rounded-2xl bg-amber-50/60 border border-amber-200">
+                    <div className="text-3xl font-black text-amber-600">
+                      {profile?.ratingAverage?.toFixed(1) || "5.0"}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1 text-amber-500">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star key={star} size={18} fill="currentColor" />
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted mt-1">
+                        Based on {profile?.ratingCount || 0} customer reviews in Kolhapur
+                      </p>
+                    </div>
                   </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {tab === "Profile" && (
-            <div className="card p-6 space-y-4 max-w-2xl">
-              <div className="flex items-center justify-between">
-                <h3 className="font-bold text-lg text-ink">{user?.name}</h3>
-                <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700">
-                  {approvalStatus.toUpperCase()}
-                </span>
-              </div>
-              <p className="text-sm text-ink">{profile?.professionalDescription || "No bio added yet"}</p>
-              <div>
-                <span className="text-xs font-semibold text-muted block mb-1">Categories:</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {(profile?.serviceCategories || []).map((c) => (
-                    <Badge key={c} tone="brand">
-                      {c}
-                    </Badge>
-                  ))}
                 </div>
-              </div>
-              <div>
-                <span className="text-xs font-semibold text-muted block mb-1">Skills:</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {(profile?.skills || []).map((s) => (
-                    <span key={s} className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
-                      {s}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <div className="pt-2">
-                <Link to="/onboarding">
-                  <Button variant="primary">Edit Full Profile & Pricing</Button>
-                </Link>
-              </div>
-            </div>
+              )}
+            </>
           )}
-        </div>
-      )}
+        </main>
+      </div>
 
+      {/* MODAL: Mark Work Completed */}
       {completeModalEnquiry && (
         <Modal
           open={Boolean(completeModalEnquiry)}
           onClose={() => !completeLoading && setCompleteModalEnquiry(null)}
-          title="Mark Work Completed"
+          title="Mark Job Completed"
         >
           <form onSubmit={handleMarkCompleteSubmit} className="space-y-4">
             <p className="text-xs text-muted">
-              Confirm that the work requested by <strong>{otherParty(completeModalEnquiry, meId).name}</strong> has been finished. Set the final billed service amount for the client to pay.
+              Confirm that the service requested by{" "}
+              <strong>{otherParty(completeModalEnquiry, meId).name}</strong> has been finished. Set the
+              final billed service amount for the client to pay via Razorpay.
             </p>
 
-            <Field label="Final Service Amount (₹)">
+            <Field label="Final Billed Amount (₹)">
               <Input
                 type="number"
                 min={1}
                 value={finalAmount}
-                onChange={(e) => setFinalAmount(Number(e.target.value) || 0)}
+                onChange={(e) => setFinalAmount(Number(e.target.value))}
                 required
               />
             </Field>
 
-            <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 border border-slate-200">
-              <div className="flex justify-between mb-1">
-                <span>Gross Billing:</span>
-                <span className="font-semibold text-ink">₹{finalAmount}</span>
-              </div>
-              <div className="flex justify-between mb-1">
-                <span>Platform Commission (10%):</span>
-                <span>-₹{Math.round(finalAmount * 0.1)}</span>
-              </div>
-              <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-emerald-700">
-                <span>Your Payout:</span>
-                <span>₹{finalAmount - Math.round(finalAmount * 0.1)}</span>
+            <div className="rounded-xl bg-blue-50 p-3 text-xs text-blue-900 border border-blue-100">
+              <span className="font-bold">Transparent Split:</span>
+              <div className="mt-1 flex justify-between">
+                <span>Worker Share (90%): ₹{Math.round(finalAmount * 0.9)}</span>
+                <span>Platform Fee (10%): ₹{Math.round(finalAmount * 0.1)}</span>
               </div>
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
-              <Button variant="secondary" onClick={() => setCompleteModalEnquiry(null)} disabled={completeLoading}>
+              <Button
+                variant="secondary"
+                onClick={() => setCompleteModalEnquiry(null)}
+                disabled={completeLoading}
+              >
                 Cancel
               </Button>
-              <Button variant="primary" type="submit" disabled={completeLoading || finalAmount <= 0}>
-                {completeLoading ? "Completing..." : "Confirm & Mark Completed"}
+              <Button
+                variant="primary"
+                type="submit"
+                disabled={completeLoading || finalAmount <= 0}
+                className="bg-emerald-600 hover:bg-emerald-700 font-bold text-white"
+              >
+                {completeLoading ? "Submitting..." : `Confirm Completion (₹${finalAmount})`}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* MODAL: Bank Account Setup */}
+      {bankModalOpen && (
+        <Modal
+          open={bankModalOpen}
+          onClose={() => !bankSaving && setBankModalOpen(false)}
+          title="Setup Bank / UPI Payout Account"
+        >
+          <form onSubmit={handleSaveBankDetails} className="space-y-4">
+            <p className="text-xs text-muted">
+              Provide your bank account or UPI details for automated or admin-authorized payout disbursements.
+            </p>
+
+            <Field label="Account Holder Name">
+              <Input
+                value={bankForm.accountHolderName}
+                onChange={(e) => setBankForm({ ...bankForm, accountHolderName: e.target.value })}
+                placeholder="e.g. Ramesh Patil"
+                required
+              />
+            </Field>
+
+            <Field label="Bank Name">
+              <Input
+                value={bankForm.bankName}
+                onChange={(e) => setBankForm({ ...bankForm, bankName: e.target.value })}
+                placeholder="e.g. State Bank of India"
+              />
+            </Field>
+
+            <Field label="Bank Account Number">
+              <Input
+                value={bankForm.accountNumber}
+                onChange={(e) => setBankForm({ ...bankForm, accountNumber: e.target.value })}
+                placeholder="e.g. 123456789012"
+              />
+            </Field>
+
+            <Field label="IFSC Code">
+              <Input
+                value={bankForm.ifsc}
+                onChange={(e) => setBankForm({ ...bankForm, ifsc: e.target.value })}
+                placeholder="e.g. SBIN0001234"
+              />
+            </Field>
+
+            <Field label="UPI ID (VPA)">
+              <Input
+                value={bankForm.upiId}
+                onChange={(e) => setBankForm({ ...bankForm, upiId: e.target.value })}
+                placeholder="e.g. ramesh@okaxis"
+              />
+            </Field>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                variant="secondary"
+                onClick={() => setBankModalOpen(false)}
+                disabled={bankSaving}
+              >
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit" disabled={bankSaving}>
+                {bankSaving ? "Saving..." : "Save Details"}
               </Button>
             </div>
           </form>

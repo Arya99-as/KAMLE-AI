@@ -1,6 +1,6 @@
 import mongoose, { Schema, type Document, type Model, type Types } from "mongoose";
 
-export type PaymentStatus = "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
+export type PaymentStatus = "PENDING" | "COMPLETED" | "FAILED" | "REFUND_REQUESTED" | "REFUNDED";
 export type RefundStatus = "NONE" | "PARTIAL" | "FULL";
 
 export interface IPaymentTransfer {
@@ -15,6 +15,8 @@ export interface IPayment extends Document<Types.ObjectId> {
   enquiryId: Types.ObjectId;
   customerId: Types.ObjectId;
   workerId: Types.ObjectId;
+  quotationId?: Types.ObjectId;
+  approvedAmount?: number;
   categoryName?: string;
   amount: number;
   currency: string;
@@ -52,6 +54,8 @@ const paymentSchema = new Schema<IPayment>(
     enquiryId: { type: Schema.Types.ObjectId, ref: "Enquiry", required: true, index: true },
     customerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     workerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    quotationId: { type: Schema.Types.ObjectId, ref: "Quotation", index: true },
+    approvedAmount: { type: Number, min: 0 },
     categoryName: { type: String, default: "" },
     amount: { type: Number, required: true, min: 0 },
     currency: { type: String, default: "INR" },
@@ -67,7 +71,7 @@ const paymentSchema = new Schema<IPayment>(
     },
     status: {
       type: String,
-      enum: ["PENDING", "COMPLETED", "FAILED", "REFUNDED"],
+      enum: ["PENDING", "COMPLETED", "FAILED", "REFUND_REQUESTED", "REFUNDED"],
       default: "PENDING",
       index: true,
     },

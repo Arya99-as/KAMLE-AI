@@ -50,12 +50,13 @@ export async function verifyPayment(req: Request, res: Response) {
 
 export async function paymentWebhook(req: Request, res: Response) {
   const signature = req.header("x-razorpay-signature") ?? req.header("x-webhook-signature") ?? "";
+  const eventId = req.header("x-razorpay-event-id") ?? undefined;
   const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
   if (!rawBody) {
     throw ApiError.badRequest("Missing raw request body for webhook");
   }
 
-  const result = await handlePaymentWebhook(rawBody, signature);
+  const result = await handlePaymentWebhook(rawBody, signature, eventId);
   res.json({ success: true, ...result });
 }
 

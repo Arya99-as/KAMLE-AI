@@ -1,4 +1,6 @@
 import type { Request, Response } from "express";
+import fs from "node:fs";
+import path from "node:path";
 import mongoose from "mongoose";
 import { z } from "zod";
 import User from "../models/User.js";
@@ -10,12 +12,14 @@ import AuditLog from "../models/AuditLog.js";
 import ServiceCategory from "../models/ServiceCategory.js";
 import Payment from "../models/Payment.js";
 import Payout from "../models/Payout.js";
+import Quotation from "../models/Quotation.js";
 import PlatformConfig from "../models/PlatformConfig.js";
 import ApiError from "../utils/ApiError.js";
 import { buildPaginated, getPagination, slugify } from "../utils/pagination.js";
 import { recordAudit } from "../services/auditService.js";
 import { recomputeRating } from "../services/workerService.js";
 import { checkAiProvider } from "../services/aiService.js";
+import { uploadRoot } from "../middleware/upload.js";
 import type { approvalSchema, accountStatusSchema, categorySchema, moderationSchema, reportStatusSchema } from "../validators/admin.js";
 
 function escapeRegex(s: string): string {
@@ -33,7 +37,7 @@ export async function aiHealth(_req: Request, res: Response) {
 }
 
 export async function dashboard(_req: Request, res: Response) {
-  const [totalUsers, totalWorkers, totalCustomers, approvedWorkers, pendingApplications, rejectedWorkers, totalEnquiries, pendingRequests, inProgressRequests, completedRequests, disputedRequests, openReports, pendingReviews, paymentAgg, failedPayments, refundedPayments, pendingPayoutsAgg, paidPayoutsAgg] = await Promise.all([
+  const [totalUsers, totalWorkers, totalCustomers, approvedWorkers, pendingApplications, rejectedWorkers, totalEnquiries, pendingRequests, inProgressRequests, completedRequests, disputedRequests, openReports, pendingReviews, totalReviews, totalCategories, paymentAgg, failedPayments, refundedPayments, pendingPayoutsAgg, paidPayoutsAgg] = await Promise.all([
     User.countDocuments({ accountStatus: { $ne: "deactivated" } }),
     User.countDocuments({ role: "worker" }),
     User.countDocuments({ role: "customer" }),
@@ -47,6 +51,8 @@ export async function dashboard(_req: Request, res: Response) {
     Enquiry.countDocuments({ status: "DISPUTED" }),
     Report.countDocuments({ status: { $in: ["open", "reviewing"] } }),
     Review.countDocuments({ moderationStatus: "pending" }),
+    Review.countDocuments({}),
+    ServiceCategory.countDocuments({}),
     Payment.aggregate<{ _id: null; count: number; total: number; commission: number }>([
       { $match: { status: "COMPLETED" } },
       { $group: { _id: null, count: { $sum: 1 }, total: { $sum: "$amount" }, commission: { $sum: "$commissionAmount" } } },
@@ -88,6 +94,8 @@ export async function dashboard(_req: Request, res: Response) {
       disputedRequests,
       openReports,
       pendingReviews,
+      totalReviews,
+      totalCategories,
       paymentsReceived,
       failedPayments,
       refundedPayments,
@@ -238,6 +246,11 @@ export async function resolveDispute(req: Request<{ id: string }>, res: Response
   const resolution = req.body.resolution || "COMPLETED";
   const note = req.body.note || "Dispute resolved by platform admin";
 
+  // A DISPUTED job may have originated from IN_PROGRESS (never counted) or from
+  // COMPLETED (already counted). Inspect history so resolving to COMPLETED
+  // increments the worker's completed-job counter exactly once.
+  const alreadyCounted = enquiry.statusHistory.some((h) => String(h.status).toUpperCase() === "COMPLETED");
+
   enquiry.status = resolution === "CANCELLED" ? "CANCELLED" : "COMPLETED";
   enquiry.disputeResolvedAt = new Date();
   enquiry.statusHistory.push({
@@ -248,6 +261,18 @@ export async function resolveDispute(req: Request<{ id: string }>, res: Response
   });
 
   await enquiry.save();
+
+  if (enquiry.status === "COMPLETED" && !alreadyCounted) {
+    await WorkerProfile.updateOne({ userId: enquiry.workerId }, { $inc: { completedEnquiries: 1 } });
+  }
+
+  await recordAudit({
+    adminId: req.user!.id,
+    action: "enquiry.dispute.resolve",
+    targetType: "Enquiry",
+    targetId: String(enquiry._id),
+    metadata: { resolution: enquiry.status, note },
+  });
 
   res.json({ success: true, enquiry, message: "Dispute resolved" });
 }
@@ -271,6 +296,140 @@ export async function listPayments(req: Request, res: Response) {
   ]);
 
   res.json(buildPaginated(items, total, page));
+}
+
+/** Full verified payment record plus consistency checks for admin reconciliation. */
+export async function getPaymentDetail(req: Request<{ id: string }>, res: Response) {
+  if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.badRequest("Invalid payment id");
+
+  const payment = await Payment.findById(req.params.id)
+    .populate("customerId", "name phone email")
+    .populate("workerId", "name phone email")
+    .populate("enquiryId", "serviceCategory problemDescription status paymentStatus serviceAmount")
+    .populate("quotationId")
+    .lean()
+    .exec();
+  if (!payment) throw ApiError.notFound("Payment record not found");
+
+  const payout = await Payout.findOne({ paymentId: payment._id }).lean().exec();
+  const quotation = (payment as unknown as { quotationId?: { approvedAmount?: number; total?: number; status?: string } }).quotationId;
+
+  const expectedCommission = Math.round((payment.amount * payment.commissionPercent) / 100);
+  const checks = [
+    {
+      key: "commission_amount",
+      ok: expectedCommission === payment.commissionAmount,
+      detail: `Expected ₹${expectedCommission} at ${payment.commissionPercent}%, recorded ₹${payment.commissionAmount}`,
+    },
+    {
+      key: "worker_payable",
+      ok: payment.amount - payment.commissionAmount === payment.workerPayableAmount,
+      detail: `Expected ₹${payment.amount - payment.commissionAmount}, recorded ₹${payment.workerPayableAmount}`,
+    },
+    {
+      key: "payout_record",
+      ok: payment.status !== "COMPLETED" || Boolean(payout),
+      detail: payout ? `Payout ${payout.status}` : "No payout record for a completed payment",
+    },
+    {
+      key: "quotation_amount",
+      ok: !quotation || quotation.approvedAmount === undefined || quotation.approvedAmount === payment.amount,
+      detail: quotation ? `Quotation approved ₹${quotation.approvedAmount ?? quotation.total}, payment ₹${payment.amount}` : "Legacy payment without a quotation",
+    },
+  ];
+
+  res.json({ success: true, payment, payout: payout ?? null, checks });
+}
+
+/**
+ * Reconciles a payment without ever inventing provider evidence:
+ * - sync: repairs derived records (enquiry payment flag, missing payout voucher)
+ * - request_refund: flags a verified payment for refund processing
+ * - mark_refunded: records a refund that was actually processed out-of-band
+ */
+export async function reconcilePayment(req: Request<{ id: string }>, res: Response) {
+  if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.badRequest("Invalid payment id");
+
+  const payment = await Payment.findById(req.params.id);
+  if (!payment) throw ApiError.notFound("Payment record not found");
+
+  const { action, note } = req.body as { action: "sync" | "request_refund" | "mark_refunded"; note?: string };
+  const rationale = (note ?? "").trim();
+
+  if (action === "request_refund") {
+    if (payment.status !== "COMPLETED") {
+      throw ApiError.badRequest("Only a verified completed payment can be flagged for refund");
+    }
+    payment.status = "REFUND_REQUESTED";
+    payment.metadata = { ...(payment.metadata ?? {}), refundRequestedAt: new Date().toISOString(), refundNote: rationale };
+    await payment.save();
+
+    await recordAudit({
+      adminId: req.user!.id,
+      action: "payment.refund.request",
+      targetType: "Payment",
+      targetId: String(payment._id),
+      metadata: { transactionRef: payment.transactionRef, amount: payment.amount, note: rationale },
+    });
+  } else if (action === "mark_refunded") {
+    if (!["COMPLETED", "REFUND_REQUESTED"].includes(payment.status)) {
+      throw ApiError.badRequest("Only a completed or refund-requested payment can be marked refunded");
+    }
+    payment.status = "REFUNDED";
+    payment.refundStatus = "FULL";
+    payment.refundedAmount = payment.amount;
+    payment.metadata = { ...(payment.metadata ?? {}), refundedAt: new Date().toISOString(), refundNote: rationale };
+    await payment.save();
+
+    await Enquiry.updateOne({ _id: payment.enquiryId }, { $set: { paymentStatus: "REFUNDED" } });
+    await Payout.updateOne(
+      { paymentId: payment._id },
+      { $set: { status: "FAILED", failureReason: "Payment refunded", note: rationale } },
+    );
+
+    await recordAudit({
+      adminId: req.user!.id,
+      action: "payment.refund.complete",
+      targetType: "Payment",
+      targetId: String(payment._id),
+      metadata: { transactionRef: payment.transactionRef, amount: payment.amount, note: rationale },
+    });
+  } else {
+    // sync: repair derived state that drifted, never change verified money fields.
+    if (payment.status === "COMPLETED") {
+      await Enquiry.updateOne({ _id: payment.enquiryId }, { $set: { paymentStatus: "PAID" } });
+      await Payout.findOneAndUpdate(
+        { paymentId: payment._id },
+        {
+          $setOnInsert: {
+            workerId: payment.workerId,
+            enquiryId: payment.enquiryId,
+            paymentId: payment._id,
+            serviceAmount: payment.amount,
+            commissionAmount: payment.commissionAmount,
+            workerPayableAmount: payment.workerPayableAmount,
+            status: "PENDING",
+            providerPayoutRef: "",
+          },
+        },
+        { upsert: true, new: true },
+      );
+    } else if (payment.status === "REFUNDED") {
+      await Enquiry.updateOne({ _id: payment.enquiryId }, { $set: { paymentStatus: "REFUNDED" } });
+      await Payout.updateOne({ paymentId: payment._id }, { $set: { status: "FAILED", failureReason: "Payment refunded" } });
+    }
+
+    await recordAudit({
+      adminId: req.user!.id,
+      action: "payment.reconcile.sync",
+      targetType: "Payment",
+      targetId: String(payment._id),
+      metadata: { status: payment.status, note: rationale },
+    });
+  }
+
+  const refreshed = await Payment.findById(payment._id).lean().exec();
+  res.json({ success: true, payment: refreshed, message: "Payment reconciliation updated" });
 }
 
 export async function listPayouts(req: Request, res: Response) {
@@ -405,6 +564,14 @@ export async function moderateReview(req: Request<{ id: string }, unknown, Moder
   await review.save();
   await recomputeRating(String(review.workerId));
 
+  await recordAudit({
+    adminId: req.user!.id,
+    action: "review.moderate." + moderationStatus,
+    targetType: "Review",
+    targetId: String(review._id),
+    metadata: { workerId: String(review.workerId), moderationStatus },
+  });
+
   res.json({ review, message: "Review " + moderationStatus });
 }
 
@@ -434,8 +601,17 @@ export async function updateReportStatus(req: Request<{ id: string }, unknown, R
   const report = await Report.findById(req.params.id);
   if (!report) throw ApiError.notFound("Report not found");
 
+  const previous = report.status;
   report.status = req.body.status;
   await report.save();
+
+  await recordAudit({
+    adminId: req.user!.id,
+    action: "report.status." + report.status,
+    targetType: "Report",
+    targetId: String(report._id),
+    metadata: { from: previous, to: report.status },
+  });
 
   res.json({ report });
 }
@@ -446,7 +622,8 @@ export async function listCategories(_req: Request, res: Response) {
 }
 
 export async function createCategory(req: Request<unknown, unknown, CategoryInput>, res: Response) {
-  const slug = slugify(req.body.name);
+  const slug = slugify(req.body.slug || req.body.name);
+  if (!slug) throw ApiError.badRequest("Category name must contain letters or numbers");
   const existing = await ServiceCategory.findOne({ slug });
   if (existing) throw ApiError.conflict("A category with this name already exists");
 
@@ -456,7 +633,16 @@ export async function createCategory(req: Request<unknown, unknown, CategoryInpu
     icon: req.body.icon ?? "wrench",
     description: req.body.description ?? "",
     keywords: req.body.keywords ?? [],
+    isActive: req.body.isActive ?? true,
     sortOrder: req.body.sortOrder ?? 0,
+  });
+
+  await recordAudit({
+    adminId: req.user!.id,
+    action: "category.create",
+    targetType: "ServiceCategory",
+    targetId: String(category._id),
+    metadata: { name: category.name, slug: category.slug },
   });
 
   res.status(201).json({ category });
@@ -472,11 +658,101 @@ export async function updateCategory(req: Request<{ id: string }, unknown, Parti
     category.name = req.body.name;
     category.slug = slugify(req.body.name);
   }
+  if (req.body.slug) {
+    const requestedSlug = slugify(req.body.slug);
+    if (!requestedSlug) throw ApiError.badRequest("Category slug must contain letters or numbers");
+    category.slug = requestedSlug;
+  }
   if (req.body.icon) category.icon = req.body.icon;
   if (req.body.description !== undefined) category.description = req.body.description;
   if (req.body.keywords) category.keywords = req.body.keywords;
+  if (req.body.isActive !== undefined) category.isActive = req.body.isActive;
   if (req.body.sortOrder !== undefined) category.sortOrder = req.body.sortOrder;
 
+  // Slugs are used for filtering and must stay unique across categories.
+  const clash = await ServiceCategory.findOne({ slug: category.slug, _id: { $ne: category._id } });
+  if (clash) throw ApiError.conflict("Another category already uses this name/slug");
+
   await category.save();
+
+  await recordAudit({
+    adminId: req.user!.id,
+    action: "category.update",
+    targetType: "ServiceCategory",
+    targetId: String(category._id),
+    metadata: {
+      name: category.name,
+      slug: category.slug,
+      isActive: category.isActive,
+    },
+  });
+
   res.json({ category });
+}
+
+/** Read-only administrative audit trail (most recent first). */
+export async function listAuditLogs(req: Request, res: Response) {
+  const page = getPagination(req.query as Record<string, unknown>, 50);
+  const filter: Record<string, unknown> = {};
+
+  if (req.query.action) {
+    filter.action = { $regex: escapeRegex(String(req.query.action)), $options: "i" };
+  }
+  if (req.query.targetType) filter.targetType = req.query.targetType;
+  if (req.query.adminId && mongoose.isValidObjectId(String(req.query.adminId))) {
+    filter.adminId = req.query.adminId;
+  }
+
+  const [items, total] = await Promise.all([
+    AuditLog.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(page.skip)
+      .limit(page.limit)
+      .populate("adminId", "name email role")
+      .lean()
+      .exec(),
+    AuditLog.countDocuments(filter),
+  ]);
+
+  res.json(buildPaginated(items, total, page));
+}
+
+/**
+ * Streams a single worker verification document to an authenticated admin.
+ * Verification documents are never publicly served; the stored URL is used
+ * only to resolve a basename inside uploadRoot/documents.
+ */
+export async function getWorkerDocument(req: Request<{ id: string; index: string }>, res: Response) {
+  if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.badRequest("Invalid profile id");
+  const index = Number(req.params.index);
+  if (!Number.isInteger(index) || index < 0) throw ApiError.badRequest("Invalid document index");
+
+  const profile = await WorkerProfile.findById(req.params.id).lean().exec();
+  if (!profile) throw ApiError.notFound("Worker profile not found");
+
+  const document = profile.verificationDocuments?.[index];
+  if (!document) throw ApiError.notFound("Verification document not found");
+
+  const prefix = "/uploads/documents/";
+  const stored = String(document.url ?? "");
+  if (!stored.startsWith(prefix)) throw ApiError.notFound("Verification document not found");
+
+  // basename() prevents path traversal even if a malformed url was persisted.
+  const filename = path.basename(stored);
+  const documentsDir = path.join(uploadRoot, "documents");
+  const absolute = path.join(documentsDir, filename);
+  if (!absolute.startsWith(documentsDir) || !fs.existsSync(absolute)) {
+    throw ApiError.notFound("Verification document file is missing");
+  }
+
+  await recordAudit({
+    adminId: req.user!.id,
+    action: "worker.document.view",
+    targetType: "WorkerProfile",
+    targetId: String(profile._id),
+    metadata: { index, filename },
+  });
+
+  res.setHeader("Cache-Control", "private, no-store");
+  res.sendFile(absolute);
 }
