@@ -129,7 +129,7 @@ function ConversationGroup({
 export function ChatPanel() {
   const { open, closeChat } = useChat();
   const { user } = useAuth();
-  const isCustomer = user?.role === "customer";
+  const canChat = Boolean(user);
 
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [input, setInput] = useState("");
@@ -195,7 +195,7 @@ export function ChatPanel() {
   // When the panel opens, load only this customer's conversations and restore
   // the last selected one (or the most recently updated one).
   useEffect(() => {
-    if (!open || !isCustomer) return;
+    if (!open || !canChat) return;
     let cancelled = false;
 
     (async () => {
@@ -238,7 +238,7 @@ export function ChatPanel() {
     return () => {
       cancelled = true;
     };
-  }, [open, isCustomer, user?.id]);
+  }, [open, canChat, user?.id]);
 
   async function startNewChat() {
     if (thinking) return;
@@ -337,7 +337,7 @@ export function ChatPanel() {
     void handleSend();
   }
 
-  if (!open || !isCustomer) return null;
+  if (!open || !canChat) return null;
 
   const now = Date.now();
   const recent = conversations.filter(

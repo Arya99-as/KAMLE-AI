@@ -23,30 +23,29 @@ const router = Router();
 
 router.post("/search", validateBody(searchBodySchema), asyncHandler(search));
 
-// Kamle AI chat is a customer-only feature. Every conversation route requires
-// an authenticated customer; workers and admins receive 403.
-const customerOnly = [authenticate, authorize("customer")];
+// Kamle AI chat is accessible to all authenticated users (customer, worker, admin)
+const chatAuth = [authenticate, authorize("customer", "admin", "worker")];
 
-router.get("/chat/conversations", ...customerOnly, asyncHandler(listConversations));
+router.get("/chat/conversations", ...chatAuth, asyncHandler(listConversations));
 router.post(
   "/chat/conversations",
-  ...customerOnly,
+  ...chatAuth,
   validateBody(createConversationSchema),
   asyncHandler(createConversation),
 );
-router.get("/chat/conversations/:id", ...customerOnly, asyncHandler(getConversation));
+router.get("/chat/conversations/:id", ...chatAuth, asyncHandler(getConversation));
 router.patch(
   "/chat/conversations/:id",
-  ...customerOnly,
+  ...chatAuth,
   validateBody(updateConversationSchema),
   asyncHandler(updateConversation),
 );
-router.delete("/chat/conversations/:id", ...customerOnly, asyncHandler(deleteConversation));
+router.delete("/chat/conversations/:id", ...chatAuth, asyncHandler(deleteConversation));
 
 router.post(
   "/chat/message",
   aiLimiter,
-  ...customerOnly,
+  ...chatAuth,
   validateBody(chatMessageSchema),
   asyncHandler(sendMessage),
 );

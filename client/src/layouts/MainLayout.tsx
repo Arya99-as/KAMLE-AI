@@ -8,8 +8,7 @@ import { useAuth } from "../context/AuthContext";
 
 export function MainLayout() {
   const { user } = useAuth();
-  // KAMLE AI chat is a customer-only feature.
-  const showKamleAi = user?.role === "customer";
+  const showKamleAi = Boolean(user);
 
   return (
     <div className="flex min-h-screen flex-col">
