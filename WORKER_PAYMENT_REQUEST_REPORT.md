@@ -72,3 +72,4 @@ sequenceDiagram
   - Net Worker Earnings
   - Payout Status & Gateway Transaction Reference
 - **Action Modal:** "Request Payment From Admin" modal collecting completion notes and optional hosted photograph evidence.
+

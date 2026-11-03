@@ -16,3 +16,4 @@ The application implements a robust integration with Razorpay Checkout for custo
 - **Test Mode Fallback:** During local development with mock credentials (`rzp_test_mock`), the backend securely authorizes test mode transactions without initiating live monetary debits.
 - **Webhook Reconciliation:** `POST /api/payments/webhook` listens for asynchronous `payment.captured` and `payment.failed` gateway events to ensure no transaction remains unverified if the customer closes their browser prematurely.
 - **Idempotency:** Webhook and verify requests verify `transactionRef` against existing payment records to prevent duplicate commission deductions or payouts.
+

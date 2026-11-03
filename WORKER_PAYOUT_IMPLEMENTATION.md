@@ -29,3 +29,4 @@ stateDiagram-v2
 3. **Admin Authorization:** Admin visits "Payment Requests" in Admin Dashboard, clicks **"Authorize Payout"**, enters the gateway provider reference (e.g. `pout_transfer_1793686403051`) and disbursement notes.
 4. **Disbursement Record:** `Payout` model is transitioned to `PAID`, `processedAt` timestamp is recorded, and `PaymentRequest.payoutStatus` is updated to `PAID`.
 5. **Worker Dashboard Update:** Worker earnings statistics (`netPayable`, `totalPaidOut`) immediately reflect the disbursement.
+

@@ -40,3 +40,4 @@ sequenceDiagram
     Server-->>Client: 200 OK (Payment settled)
     Client->>Customer: Show verified receipt modal
 ```
+

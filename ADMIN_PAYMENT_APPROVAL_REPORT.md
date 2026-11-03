@@ -39,3 +39,4 @@ stateDiagram-v2
 - **Price Lock:** The Admin cannot arbitrarily alter the original quotation amount approved between customer and worker.
 - **Audit Trails:** All state changes are appended to the embedded `history[]` sub-document with the administrator's ID, action timestamp, and rationale remarks.
 - **Payout Gate:** The "Authorize Payout" action is strictly disabled until backend verification confirms customer payment is settled in status `PAID`.
+

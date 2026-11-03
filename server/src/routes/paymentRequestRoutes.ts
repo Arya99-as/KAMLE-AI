@@ -29,3 +29,4 @@ router.post("/admin/:id/decision", authenticate, authorize("admin"), asyncHandle
 router.post("/admin/authorize-payout", authenticate, authorize("admin"), asyncHandler(adminAuthorizePayout));
 
 export default router;
+

@@ -29,3 +29,4 @@ $$\text{Worker Net Earnings} = \text{Verified Customer Payment} - \text{Platform
 | Customer Gross Payment | ₹5,000.00 | Agreed approved quotation |
 | Platform Commission (10%) | ₹500.00 | ₹5,000 × 10 / 100 |
 | Worker Net Payable | ₹4,500.00 | ₹5,000 - ₹500 |
+

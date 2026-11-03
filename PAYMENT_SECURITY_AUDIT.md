@@ -17,3 +17,4 @@
 | **Double Payout / Duplicate Invoicing** | Database uniqueness and state machine checks prevent multiple active payment requests for the same enquiry. | Verified |
 | **Signature Forgery** | HMAC SHA256 cryptographic verification of `razorpay_order_id` + `razorpay_payment_id` against `RAZORPAY_KEY_SECRET`. | Verified |
 | **Role Elevation on Chat / Search** | Authenticated routes accept valid tokens from `customer`, `worker`, and `admin` without role collision. | Verified |
+
