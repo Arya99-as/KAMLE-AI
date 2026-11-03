@@ -12,6 +12,9 @@ export const searchQuerySchema = z.object({
       return arr.map((s) => s.trim()).filter(Boolean);
     }),
   location: z.string().trim().max(120).optional().default(""),
+  lat: z.coerce.number().min(-90).max(90).optional(),
+  lng: z.coerce.number().min(-180).max(180).optional(),
+  radiusKm: z.coerce.number().min(1).max(200).optional().default(25),
   minExperience: z.coerce.number().min(0).max(70).optional(),
   maxBudget: z.coerce.number().min(0).optional(),
   minRating: z.coerce.number().min(0).max(5).optional(),

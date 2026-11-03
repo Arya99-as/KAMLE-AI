@@ -2,11 +2,15 @@ import mongoose from "mongoose";
 import WorkerProfile, { type IWorkerProfile } from "../models/WorkerProfile.js";
 import User from "../models/User.js";
 import type { Urgency } from "../types/ai.js";
+import { getDistanceInKm } from "./googleMapsService.js";
 
 export interface MatchCriteria {
   category?: string | null;
   skills?: string[];
   location?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  radiusKm?: number | null;
   budget?: number | null;
   urgency?: Urgency;
   /** Free-text query matched against description, skills and categories. */
@@ -99,7 +103,18 @@ function buildCandidateQuery(criteria: MatchCriteria): Record<string, unknown> {
       query.skills = { $regex: tokens.map(escapeRegex).join("|"), $options: "i" };
     }
   }
-  if (criteria.location) {
+  if (typeof criteria.lat === "number" && typeof criteria.lng === "number") {
+    const maxDistanceMeters = (criteria.radiusKm || 25) * 1000;
+    query.locationGeo = {
+      $near: {
+        $geometry: {
+          type: "Point",
+          coordinates: [criteria.lng, criteria.lat],
+        },
+        $maxDistance: maxDistanceMeters,
+      },
+    };
+  } else if (criteria.location) {
     query.serviceAreas = { $regex: escapeRegex(criteria.location.trim()), $options: "i" };
   }
   if (criteria.text && criteria.text.trim()) {
@@ -165,7 +180,18 @@ function scoreWorker(profile: IWorkerProfile, criteria: MatchCriteria, weights: 
   factors.push({ key: "skill", value: Math.max(0, Math.min(1, skillValue)) });
 
   // --- Service area match -----------------------------------------------------
-  if (criteria.location) {
+  if (typeof criteria.lat === "number" && typeof criteria.lng === "number" && profile.locationGeo?.coordinates) {
+    const [wLng, wLat] = profile.locationGeo.coordinates;
+    const distKm = getDistanceInKm(criteria.lat, criteria.lng, wLat, wLng);
+    const maxRadius = criteria.radiusKm || profile.serviceRadiusKm || 25;
+    if (distKm <= maxRadius) {
+      const distScore = Math.max(0.4, 1 - distKm / maxRadius);
+      factors.push({ key: "area", value: distScore });
+      reasons.push(`Within ${Math.round(distKm)} km of your location`);
+    } else {
+      factors.push({ key: "area", value: 0.2 });
+    }
+  } else if (criteria.location) {
     const areaMatch = includesCI(profile.serviceAreas, criteria.location);
     factors.push({ key: "area", value: areaMatch ? 1 : 0.5 });
     if (areaMatch) reasons.push(`Serves ${criteria.location}`);

@@ -12,9 +12,23 @@ export interface IUser extends Document<Types.ObjectId> {
   accountStatus: AccountStatus;
   avatarUrl?: string;
   location?: string;
+  locationGeo?: {
+    type: "Point";
+    coordinates: [number, number];
+  };
+  whatsappOptIn?: boolean;
+  whatsappOptOutAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const pointSchema = new Schema(
+  {
+    type: { type: String, enum: ["Point"], default: "Point" },
+    coordinates: { type: [Number], required: true },
+  },
+  { _id: false },
+);
 
 const userSchema = new Schema<IUser>(
   {
@@ -46,6 +60,9 @@ const userSchema = new Schema<IUser>(
     },
     avatarUrl: { type: String, default: "" },
     location: { type: String, default: "", trim: true, maxlength: 120 },
+    locationGeo: { type: pointSchema, required: false },
+    whatsappOptIn: { type: Boolean, default: true },
+    whatsappOptOutAt: { type: Date },
   },
   {
     timestamps: true,
@@ -61,6 +78,7 @@ const userSchema = new Schema<IUser>(
 );
 
 userSchema.index({ role: 1, accountStatus: 1 });
+userSchema.index({ locationGeo: "2dsphere" }, { sparse: true });
 
 export const User: Model<IUser> =
   (mongoose.models.User as Model<IUser>) || mongoose.model<IUser>("User", userSchema);

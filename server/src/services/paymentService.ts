@@ -7,6 +7,7 @@ import Quotation from "../models/Quotation.js";
 import PlatformConfig from "../models/PlatformConfig.js";
 import WebhookEvent from "../models/WebhookEvent.js";
 import { getPayableQuotation } from "./quotationService.js";
+import { notifyUser } from "./whatsappService.js";
 import ApiError from "../utils/ApiError.js";
 import logger from "../utils/logger.js";
 import env from "../config/env.js";
@@ -257,6 +258,22 @@ async function settlePayment(
       },
       { upsert: true, new: true, session: session ?? undefined },
     ).exec();
+
+    notifyUser(
+      String(completedPayment.customerId),
+      "PAYMENT",
+      "Payment Successful",
+      `Your payment of ₹${completedPayment.amount} has been received. Thank you!`,
+      { paymentId: String(completedPayment._id) },
+    ).catch(() => {});
+
+    notifyUser(
+      String(completedPayment.workerId),
+      "PAYMENT",
+      "Payment Received",
+      `Customer paid ₹${completedPayment.amount} for your service. Your net earnings: ₹${completedPayment.workerPayableAmount}.`,
+      { paymentId: String(completedPayment._id) },
+    ).catch(() => {});
 
     return { payment: completedPayment, payout, alreadyProcessed: false };
   });

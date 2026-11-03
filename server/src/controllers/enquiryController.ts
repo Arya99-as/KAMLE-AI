@@ -6,6 +6,7 @@ import ApiError from "../utils/ApiError.js";
 import { buildPaginated, getPagination } from "../utils/pagination.js";
 import type { z } from "zod";
 import type { createEnquirySchema, updateEnquiryStatusSchema } from "../validators/interactions.js";
+import { notifyUser } from "../services/whatsappService.js";
 
 type CreateInput = z.infer<typeof createEnquirySchema>;
 type UpdateInput = z.infer<typeof updateEnquiryStatusSchema>;
@@ -107,6 +108,14 @@ export async function createEnquiry(req: Request<unknown, unknown, CreateInput>,
   });
 
   res.status(201).json({ enquiry });
+
+  notifyUser(
+    workerId,
+    "ENQUIRY",
+    "New Service Request",
+    `You received a new service request for ${serviceCategory}.`,
+    { enquiryId: String(enquiry._id) },
+  ).catch(() => {});
 }
 
 export async function listMyEnquiries(req: Request, res: Response) {
@@ -206,6 +215,32 @@ export async function updateEnquiryStatus(req: Request<{ id: string }, unknown, 
 
   await enquiry.save();
 
+  if (normalizedTarget === "ACCEPTED") {
+    notifyUser(
+      String(enquiry.customerId),
+      "ENQUIRY",
+      "Request Accepted",
+      `Your service request for ${enquiry.serviceCategory} has been accepted by the professional.`,
+      { enquiryId: String(enquiry._id) },
+    ).catch(() => {});
+  } else if (normalizedTarget === "REJECTED") {
+    notifyUser(
+      String(enquiry.customerId),
+      "ENQUIRY",
+      "Request Declined",
+      `The professional was unable to accept your request for ${enquiry.serviceCategory}.`,
+      { enquiryId: String(enquiry._id) },
+    ).catch(() => {});
+  } else if (normalizedTarget === "COMPLETED") {
+    notifyUser(
+      String(enquiry.customerId),
+      "BOOKING",
+      "Work Completed",
+      `The professional has completed the work for ${enquiry.serviceCategory}. Please review and complete payment.`,
+      { enquiryId: String(enquiry._id) },
+    ).catch(() => {});
+  }
+
   // Count a completed job exactly once. A DISPUTED job was already counted when
   // the worker first marked it COMPLETED, and resolving the dispute to COMPLETED
   // must not increment the counter a second time.
@@ -240,6 +275,14 @@ export async function confirmCompletion(req: Request<{ id: string }>, res: Respo
       note: "Customer confirmed the work is completed",
     });
     await enquiry.save();
+
+    notifyUser(
+      String(enquiry.workerId),
+      "BOOKING",
+      "Customer Confirmed Completion",
+      `Customer has confirmed completion for ${enquiry.serviceCategory}.`,
+      { enquiryId: String(enquiry._id) },
+    ).catch(() => {});
   }
 
   res.json({ success: true, enquiry });

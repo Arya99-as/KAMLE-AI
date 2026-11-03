@@ -216,14 +216,28 @@ export async function seedDatabase(disconnect = false) {
   });
 
   for (const w of WORKERS) {
+    const isPune = w.location.toLowerCase().includes("pune");
+    const baseLng = isPune ? 73.8567 : 74.2433;
+    const baseLat = isPune ? 18.5204 : 16.7050;
+    const geoPoint = {
+      type: "Point" as const,
+      coordinates: [
+        Number((baseLng + (Math.random() - 0.5) * 0.04).toFixed(4)),
+        Number((baseLat + (Math.random() - 0.5) * 0.04).toFixed(4)),
+      ] as [number, number],
+    };
+
     const user = await User.create({
       name: w.name, phone: w.phone, email: w.email, passwordHash,
       role: "worker", accountStatus: "active", location: w.location,
+      locationGeo: geoPoint,
     });
 
     const profile = await WorkerProfile.create({
       userId: user._id,
       ...w.profile,
+      locationGeo: geoPoint,
+      serviceRadiusKm: 20,
       portfolioImages: w.profile.portfolioImages ?? [],
       verificationDocuments: w.verificationStatus === "verified"
         ? [{ label: "ID Proof", url: "/uploads/documents/sample-id.pdf" }]

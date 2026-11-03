@@ -37,6 +37,11 @@ export interface IVerificationDoc {
   url: string;
 }
 
+export interface IGeoPoint {
+  type: "Point";
+  coordinates: [number, number]; // [longitude, latitude]
+}
+
 export interface IWorkerProfile extends Document<Types.ObjectId> {
   userId: Types.ObjectId;
   professionalDescription: string;
@@ -45,6 +50,8 @@ export interface IWorkerProfile extends Document<Types.ObjectId> {
   experienceYears: number;
   experienceSummary: string;
   serviceAreas: string[];
+  locationGeo?: IGeoPoint;
+  serviceRadiusKm?: number;
   pricing: IPricing;
   availability: IAvailability;
   portfolioImages: string[];
@@ -75,6 +82,14 @@ const availabilitySchema = new Schema<IAvailability>(
     availableNow: { type: Boolean, default: true },
     days: { type: [String], default: [] },
     note: { type: String, maxlength: 200, default: "" },
+  },
+  { _id: false },
+);
+
+const pointSchema = new Schema(
+  {
+    type: { type: String, enum: ["Point"], default: "Point" },
+    coordinates: { type: [Number], required: true },
   },
   { _id: false },
 );
@@ -119,6 +134,8 @@ const workerProfileSchema = new Schema<IWorkerProfile>(
       type: availabilitySchema,
       default: () => ({ availableNow: true, days: [] }),
     },
+    locationGeo: { type: pointSchema, required: false },
+    serviceRadiusKm: { type: Number, default: 15, min: 1, max: 100 },
     portfolioImages: { type: [String], default: [] },
     verificationDocuments: { type: [verificationDocSchema], default: [] },
     payoutAccount: { type: payoutAccountSchema, default: () => ({ status: "unconfigured", isVerified: false }) },
@@ -146,6 +163,7 @@ const workerProfileSchema = new Schema<IWorkerProfile>(
 workerProfileSchema.index({ approvalStatus: 1, serviceCategories: 1 });
 workerProfileSchema.index({ approvalStatus: 1, serviceAreas: 1 });
 workerProfileSchema.index({ approvalStatus: 1, skills: 1 });
+workerProfileSchema.index({ locationGeo: "2dsphere" }, { sparse: true });
 workerProfileSchema.index({ professionalDescription: "text", skills: "text", serviceCategories: "text" });
 
 export const WorkerProfile: Model<IWorkerProfile> =

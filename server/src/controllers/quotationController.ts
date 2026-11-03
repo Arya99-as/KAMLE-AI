@@ -12,6 +12,7 @@ import {
   computeSubtotal,
   expireQuotationIfNeeded,
 } from "../services/quotationService.js";
+import { notifyUser } from "../services/whatsappService.js";
 import type {
   adminQuotationDecisionSchema,
   adminQuotationRemarksSchema,
@@ -216,6 +217,14 @@ export async function submitQuotation(req: Request<{ id: string }>, res: Respons
   addHistory(quotation, "SUBMITTED", req.user!.id, "worker", "Submitted for admin approval");
   await quotation.save();
 
+  notifyUser(
+    String(quotation.customerId),
+    "QUOTATION",
+    "Quotation Prepared",
+    `The professional has prepared an itemized quotation of ₹${quotation.total}. It has been submitted for admin verification.`,
+    { quotationId: String(quotation._id) },
+  ).catch(() => {});
+
   const populated = await Quotation.findById(quotation._id).populate(POPULATE).lean().exec();
   res.json({ quotation: populated });
 }
@@ -315,6 +324,24 @@ export async function respondToQuotation(req: Request<{ id: string }, unknown, R
   );
   await quotation.save();
 
+  if (accepted) {
+    notifyUser(
+      String(quotation.workerId),
+      "QUOTATION",
+      "Quotation Accepted",
+      `The customer accepted your quotation of ₹${quotation.total}.`,
+      { quotationId: String(quotation._id) },
+    ).catch(() => {});
+  } else {
+    notifyUser(
+      String(quotation.workerId),
+      "QUOTATION",
+      "Quotation Rejected",
+      `The customer declined the quotation. You may review and submit a revision.`,
+      { quotationId: String(quotation._id) },
+    ).catch(() => {});
+  }
+
   const populated = await Quotation.findById(quotation._id).populate(POPULATE).lean().exec();
   res.json({ quotation: populated });
 }
@@ -361,11 +388,25 @@ export async function decideQuotation(req: Request<{ id: string }, unknown, Deci
     quotation.adminRemarks = remarks;
     quotation.decidedAt = new Date();
     addHistory(quotation, "REVISION_REQUESTED", req.user!.id, "admin", remarks);
+    notifyUser(
+      String(quotation.workerId),
+      "QUOTATION",
+      "Quotation Revision Requested",
+      `Admin requested changes to your quotation: ${remarks || "Please check details."}`,
+      { quotationId: String(quotation._id) },
+    ).catch(() => {});
   } else if (decision === "reject") {
     quotation.status = "REJECTED";
     quotation.adminRemarks = remarks;
     quotation.decidedAt = new Date();
-    addHistory(quotation, "REJECTED", req.user!.id, "admin", remarks);
+    addHistory(quotation, "REVISION_REQUESTED", req.user!.id, "admin", remarks);
+    notifyUser(
+      String(quotation.workerId),
+      "QUOTATION",
+      "Quotation Rejected",
+      `Admin rejected the quotation: ${remarks || "Does not meet requirements."}`,
+      { quotationId: String(quotation._id) },
+    ).catch(() => {});
   } else {
     quotation.status = "APPROVED";
     quotation.adminRemarks = remarks;
@@ -376,6 +417,20 @@ export async function decideQuotation(req: Request<{ id: string }, unknown, Deci
     quotation.customerStatus = "PENDING";
     quotation.respondedAt = undefined;
     addHistory(quotation, "APPROVED", req.user!.id, "admin", remarks || "Quotation approved");
+    notifyUser(
+      String(quotation.customerId),
+      "QUOTATION",
+      "Official Quotation Approved",
+      `Admin has approved the quotation of ₹${quotation.total}. Please review and approve to proceed with work.`,
+      { quotationId: String(quotation._id) },
+    ).catch(() => {});
+    notifyUser(
+      String(quotation.workerId),
+      "QUOTATION",
+      "Quotation Approved",
+      `Your quotation of ₹${quotation.total} has been approved by admin and sent to customer.`,
+      { quotationId: String(quotation._id) },
+    ).catch(() => {});
     // Keep the enquiry amount in sync for legacy views/receipts. Payments still
     // read the immutable approvedAmount from the quotation document.
     await Enquiry.updateOne({ _id: quotation.enquiryId }, { $set: { serviceAmount: quotation.total } });

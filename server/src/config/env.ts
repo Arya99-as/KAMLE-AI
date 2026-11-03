@@ -82,6 +82,19 @@ export const env = {
     };
   })(),
 
+  whatsapp: {
+    phoneNumberId: str("WHATSAPP_PHONE_NUMBER_ID"),
+    businessAccountId: str("WHATSAPP_BUSINESS_ACCOUNT_ID"),
+    accessToken: str("WHATSAPP_ACCESS_TOKEN"),
+    verifyToken: str("WHATSAPP_VERIFY_TOKEN", nodeEnv === "production" ? "" : "kamle_whatsapp_token_dev"),
+    apiVersion: str("WHATSAPP_API_VERSION", "v21.0"),
+  },
+
+  googleMaps: {
+    apiKey: str("GOOGLE_MAPS_API_KEY"),
+    serverApiKey: str("GOOGLE_MAPS_SERVER_API_KEY") || str("GOOGLE_MAPS_API_KEY"),
+  },
+
   rateLimit: {
     windowMs: num("RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
     max: num("RATE_LIMIT_MAX", 300),
