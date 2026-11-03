@@ -388,3 +388,4 @@ The `PlatformConfig` model stores the global `commissionPercent` value. The `pay
 | Backups | ❌ None | ✅ Automated Atlas backups |
 | Connection string | Set by `connectDB()` auto-detect | `MONGODB_URI` env var |
 | Seed data | Auto-seeds on empty DB | Manual seeding / migrations |
+

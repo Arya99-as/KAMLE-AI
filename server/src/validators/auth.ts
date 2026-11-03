@@ -34,3 +34,10 @@ export const updateMeSchema = z.object({
   location: z.string().trim().max(120).optional(),
 });
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
+
+export const demoLoginSchema = z.object({
+  role: z.enum(["admin", "customer", "worker"], {
+    errorMap: () => ({ message: "Role must be admin, customer, or worker" }),
+  }),
+});
+export type DemoLoginInput = z.infer<typeof demoLoginSchema>;

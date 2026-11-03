@@ -101,6 +101,16 @@ export const env = {
     authMax: num("AUTH_RATE_LIMIT_MAX", 20),
     aiMax: num("AI_RATE_LIMIT_MAX", 30),
   },
+
+  // Demo login — enabled only in non-production by default.
+  // Set DEMO_LOGIN_ENABLED=true to allow it in production (staging environments).
+  // Credentials are resolved server-side; no passwords appear in frontend code.
+  demoLogin: {
+    enabled: nodeEnv !== "production" || bool("DEMO_LOGIN_ENABLED", false),
+    adminIdentifier: str("DEMO_ADMIN_IDENTIFIER", "admin@kamle.ai"),
+    customerIdentifier: str("DEMO_CUSTOMER_IDENTIFIER", "customer@example.com"),
+    workerIdentifier: str("DEMO_WORKER_IDENTIFIER", "9800000001"),
+  },
 } as const;
 
 const insecureSecretPatterns = ["dev_only_insecure_secret", "change_me", "replace_me_with"];

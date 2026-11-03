@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { fetchMe, login as apiLogin, register as apiRegister } from "../services/api";
+import { fetchMe, login as apiLogin, register as apiRegister, demoLogin as apiDemoLogin } from "../services/api";
 import { tokenStore } from "../lib/api";
 import type { User, WorkerProfile } from "../types";
 
@@ -8,6 +8,7 @@ interface AuthContextValue {
   workerProfile: WorkerProfile | null;
   loading: boolean;
   login: (identifier: string, password: string) => Promise<void>;
+  demoLogin: (role: "admin" | "customer" | "worker") => Promise<User>;
   register: (data: { name: string; phone: string; email?: string; password: string; role: "customer" | "worker"; location?: string }) => Promise<void>;
   logout: () => void;
   setUser: (user: User) => void;
@@ -51,6 +52,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUserState(data.user);
   }, []);
 
+  const demoLogin = useCallback(async (role: "admin" | "customer" | "worker") => {
+    const data = await apiDemoLogin(role);
+    tokenStore.set(data.token);
+    setUserState(data.user);
+    if (role === "worker") {
+      try {
+        const meData = await fetchMe();
+        setWorkerProfileState(meData.workerProfile);
+      } catch {
+        // ignore profile load error
+      }
+    }
+    return data.user;
+  }, []);
+
   const register = useCallback(async (data: { name: string; phone: string; email?: string; password: string; role: "customer" | "worker"; location?: string }) => {
     const result = await apiRegister(data);
     tokenStore.set(result.token);
@@ -72,6 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       workerProfile,
       loading,
       login,
+      demoLogin,
       register,
       logout,
       setUser,
@@ -79,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refresh,
       isAuthenticated: Boolean(user),
     }),
-    [user, workerProfile, loading, login, register, logout, setUser, setWorkerProfile, refresh],
+    [user, workerProfile, loading, login, demoLogin, register, logout, setUser, setWorkerProfile, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

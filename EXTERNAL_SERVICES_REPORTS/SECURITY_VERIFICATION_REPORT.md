@@ -282,3 +282,4 @@ globalLimiter:   { windowMs: 15min, max: 300 }  — all other endpoints
 | No refresh token mechanism | Medium | Implement short-lived access tokens + refresh tokens |
 | No brute-force lockout on failed logins | Medium | Increment failed attempts counter; lock after 5 failures |
 | Admin endpoints not IP-restricted | Low | Consider IP allowlist for admin routes in production |
+

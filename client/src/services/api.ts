@@ -33,6 +33,10 @@ export function login(body: { identifier: string; password: string }) {
   return api<AuthResult>("/auth/login", { method: "POST", body, auth: false });
 }
 
+export function demoLogin(role: "admin" | "customer" | "worker") {
+  return api<AuthResult>("/auth/demo-login", { method: "POST", body: { role }, auth: false });
+}
+
 export interface MeResult {
   user: User;
   workerProfile: WorkerProfile | null;

@@ -5,6 +5,7 @@ import ApiError from "../utils/ApiError.js";
 import { hashPassword, verifyPassword } from "../utils/password.js";
 import { signToken } from "../utils/jwt.js";
 import type { LoginInput, RegisterInput, UpdateMeInput } from "../validators/auth.js";
+import { env } from "../config/env.js";
 
 function publicUser(user: InstanceType<typeof User>) {
   return {
@@ -89,4 +90,47 @@ export async function updateMe(req: Request<unknown, unknown, UpdateMeInput>, re
   await user.save();
 
   res.json({ user: publicUser(user) });
+}
+
+/**
+ * POST /auth/demo-login
+ * One-click demo authentication — resolves credentials server-side.
+ * Disabled in production unless DEMO_LOGIN_ENABLED=true.
+ * Body: { role: "admin" | "customer" | "worker" }
+ */
+export async function demoLogin(req: Request, res: Response) {
+  if (!env.demoLogin.enabled) {
+    throw ApiError.forbidden("Demo login is not available in this environment.");
+  }
+
+  const role = (req.body as { role?: unknown }).role;
+  if (role !== "admin" && role !== "customer" && role !== "worker") {
+    throw ApiError.badRequest("role must be one of: admin, customer, worker");
+  }
+
+  const identifierMap: Record<"admin" | "customer" | "worker", string> = {
+    admin: env.demoLogin.adminIdentifier,
+    customer: env.demoLogin.customerIdentifier,
+    worker: env.demoLogin.workerIdentifier,
+  };
+
+  const identifier = identifierMap[role];
+  const query = identifier.includes("@")
+    ? { email: identifier.toLowerCase() }
+    : { phone: identifier.trim() };
+
+  const user = await User.findOne(query);
+  if (!user) {
+    throw ApiError.notFound(`Demo ${role} account not found. Run the seed script first.`);
+  }
+  if (user.accountStatus === "suspended") {
+    throw ApiError.forbidden("Demo account is suspended.");
+  }
+  // Extra guard: ensure the DB role matches the requested role
+  if (user.role !== role) {
+    throw ApiError.forbidden("Demo account role mismatch. Contact the administrator.");
+  }
+
+  const token = signToken({ sub: String(user._id), role: user.role });
+  res.json({ token, user: publicUser(user) });
 }

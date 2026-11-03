@@ -446,3 +446,4 @@ pm2 restart kamle-ai-api
 | `GOOGLE_MAPS_SERVER_API_KEY` | GCP Console → APIs & Services → Credentials |
 | `GOOGLE_MAPS_API_KEY` | GCP Console → APIs & Services → Credentials |
 | `AI_API_KEY` | Google AI Studio (for Gemini) or respective AI provider console |
+
