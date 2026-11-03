@@ -98,7 +98,7 @@ export const env = {
   rateLimit: {
     windowMs: num("RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
     max: num("RATE_LIMIT_MAX", 300),
-    authMax: num("AUTH_RATE_LIMIT_MAX", 20),
+    authMax: num("AUTH_RATE_LIMIT_MAX", nodeEnv === "development" ? 300 : 20),
     aiMax: num("AI_RATE_LIMIT_MAX", 30),
   },
 

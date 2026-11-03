@@ -6,6 +6,8 @@ import {
   CreditCard,
   FileText,
   Heart,
+  LogOut,
+  MapPin,
   Receipt,
   RefreshCw,
   Search,
@@ -15,8 +17,11 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useChat } from "../../features/chat/ChatContext";
+import { FloatingChatButton } from "../../features/chat/FloatingChatButton";
+import { ChatPanel } from "../../features/chat/ChatPanel";
+import { useLocation as useUserLocation } from "../../context/LocationContext";
 import {
   confirmEnquiryCompletion,
   createPaymentOrder,
@@ -32,7 +37,7 @@ import {
 } from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
 import type { Enquiry, Payment, Quotation, Review, UserRef, PublicWorker } from "../../types";
-import { Badge, Button, Field, Modal, Select, Spinner, StatusBadge, Textarea } from "../../components/ui/primitives";
+import { Avatar, Badge, Button, Field, Modal, Select, Spinner, StatusBadge, Textarea } from "../../components/ui/primitives";
 import { EmptyState } from "../../components/ui/states";
 import { WorkerCard } from "../../components/worker/WorkerCard";
 import { Logo } from "../../components/brand/Logo";
@@ -71,8 +76,15 @@ const AI_SUGGESTION_CHIPS = [
 ];
 
 export default function CustomerDashboard() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const { location: locationName } = useUserLocation();
   const { openChat } = useChat();
+
+  function handleLogout() {
+    logout();
+    navigate("/login");
+  }
 
   const [tab, setTab] = useState<"requests" | "quotations" | "payments" | "recommended" | "favorites" | "reviews">("requests");
   const [quotationRefreshKey, setQuotationRefreshKey] = useState(0);
@@ -373,21 +385,30 @@ export default function CustomerDashboard() {
     <div className="min-h-screen bg-[#F5F8FD]">
       {/* Customer Header & Navigation */}
       <div className="border-b border-line bg-white shadow-sm sticky top-0 z-20">
-        <div className="container-x flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="container-x flex flex-col gap-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <Logo size="sm" />
+            <Link to="/" aria-label="KAMLE AI home" className="hover:opacity-90 transition">
+              <Logo size="sm" />
+            </Link>
+            <div className="h-6 w-px bg-slate-200 hidden sm:block" />
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl font-black text-ink">My Service Hub</h1>
+                <h1 className="text-lg font-black text-ink">My Service Hub</h1>
                 <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[11px] font-bold text-blue-800">
                   Customer
                 </span>
+                <span className="hidden md:inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
+                  <MapPin size={12} className="text-brand-600" />
+                  {locationName}
+                </span>
               </div>
-              <p className="text-xs text-muted">Discover local professionals, manage bookings, and make secure payments</p>
+              <p className="text-xs text-muted hidden sm:block">
+                Discover local professionals, manage bookings, and make secure payments
+              </p>
             </div>
           </div>
 
-          {/* Quick Action Navigation */}
+          {/* Quick Action Navigation & Profile */}
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="secondary"
@@ -414,6 +435,23 @@ export default function CustomerDashboard() {
               <Sparkles size={14} />
               Ask KAMLE AI
             </Button>
+
+            {/* Profile Avatar & Logout */}
+            <div className="flex items-center gap-2 pl-2 border-l border-slate-200 ml-1">
+              <div className="hidden sm:flex items-center gap-2 py-0.5 pl-1 pr-1">
+                <Avatar name={user?.name || "Customer"} src={user?.avatarUrl} size={28} />
+                <span className="text-xs font-bold text-slate-800">{user?.name?.split(" ")[0]}</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleLogout}
+                className="text-slate-500 hover:text-rose-600 p-2"
+                title="Log out"
+              >
+                <LogOut size={16} />
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -1156,6 +1194,10 @@ export default function CustomerDashboard() {
         payment={selectedReceipt}
         onClose={() => setSelectedReceipt(null)}
       />
+
+      {/* Floating AI Assistant for Customer */}
+      <FloatingChatButton />
+      <ChatPanel />
     </div>
   );
 }

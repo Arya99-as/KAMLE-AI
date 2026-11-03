@@ -66,6 +66,28 @@ export function App() {
         }
       />
 
+      {/* Dedicated Clean Customer Dashboard (No duplicate marketplace header) */}
+      <Route
+        path="account/customer"
+        element={
+          <RequireAuth roles={["customer"]}>
+            <Lazy>
+              <CustomerDashboard />
+            </Lazy>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="dashboard/customer"
+        element={
+          <RequireAuth roles={["customer"]}>
+            <Lazy>
+              <CustomerDashboard />
+            </Lazy>
+          </RequireAuth>
+        }
+      />
+
       {/* Marketplace & Customer Layout */}
       <Route element={<MainLayout />}>
         <Route
@@ -124,26 +146,6 @@ export function App() {
         />
         <Route path="account" element={<RedirectByRole />} />
         <Route path="dashboard" element={<RedirectByRole />} />
-        <Route
-          path="account/customer"
-          element={
-            <RequireAuth roles={["customer"]}>
-              <Lazy>
-                <CustomerDashboard />
-              </Lazy>
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="dashboard/customer"
-          element={
-            <RequireAuth roles={["customer"]}>
-              <Lazy>
-                <CustomerDashboard />
-              </Lazy>
-            </RequireAuth>
-          }
-        />
         <Route
           path="about"
           element={
