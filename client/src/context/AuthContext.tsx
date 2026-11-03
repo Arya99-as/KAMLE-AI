@@ -44,6 +44,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refresh();
+
+    const handleAuthExpired = () => {
+      tokenStore.clear();
+      setUserState(null);
+      setWorkerProfileState(null);
+    };
+    window.addEventListener("kamle:auth_expired", handleAuthExpired);
+    return () => window.removeEventListener("kamle:auth_expired", handleAuthExpired);
   }, [refresh]);
 
   const login = useCallback(async (identifier: string, password: string) => {

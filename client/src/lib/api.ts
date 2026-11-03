@@ -52,6 +52,12 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
 
   if (!res.ok) {
     const error = data.error as { message?: string; code?: string; details?: unknown } | undefined;
+    if (res.status === 401 && auth) {
+      tokenStore.clear();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("kamle:auth_expired"));
+      }
+    }
     throw new ApiError(res.status, error?.code ?? "ERROR", error?.message ?? `Request failed (${res.status})`, error?.details);
   }
 

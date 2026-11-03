@@ -22,7 +22,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     }
 
     const user = await User.findById(payload.sub);
-    if (!user) throw ApiError.unauthorized("Account no longer exists");
+    if (!user) throw ApiError.unauthorized("Session expired. Account no longer exists. Please log in again.");
     if (user.accountStatus === "suspended") throw ApiError.forbidden("This account is suspended");
     if (user.accountStatus === "deactivated") throw ApiError.forbidden("This account is deactivated");
 

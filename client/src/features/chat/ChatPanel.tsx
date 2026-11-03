@@ -547,7 +547,18 @@ export function ChatPanel() {
 
           {/* Composer */}
           <div className="border-t border-line bg-white px-4 pb-4 pt-3">
-            {error && <p className="mb-2 text-xs text-danger">{error}</p>}
+            {error && (
+              <div className="mb-2 p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center justify-between">
+                <span>{error.toLowerCase().includes("account no longer exists") ? "Your session has expired. Please log in again." : error}</span>
+                <Link
+                  to="/login"
+                  onClick={() => closeChat()}
+                  className="ml-2 font-bold underline text-blue-600 hover:text-blue-800"
+                >
+                  Log In
+                </Link>
+              </div>
+            )}
             <p className="mb-2 flex items-center gap-1 text-[11px] text-muted">
               <UserRound size={11} /> You're signed in. I only show approved workers from KAMLE AI —
               I never make up profiles, prices or reviews.
